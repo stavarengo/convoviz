@@ -13,3 +13,7 @@ test-output/
 # etc..
 
 tmp/
+
+# Ralph orchestrator worktrees and hint symlinks
+.claude/worktrees/
+docs/ai/ralph/current
