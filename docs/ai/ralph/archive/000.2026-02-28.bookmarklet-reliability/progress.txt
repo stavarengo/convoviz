@@ -1,0 +1,87 @@
+# PRD: Bookmarklet Reliability & Correctness Overhaul
+
+Base commit: 1a0bfa6bc9a5abbe42ca5e3cbadb3ebc741eee80
+
+## Codebase Patterns
+
+- `js/script.js` is the standalone browser bookmarklet (formerly `js/script.gpt.temp.js`) -- no Node.js, no test framework, no build system. Syntax-check with `node --check` after stripping the `javascript: ` prefix.
+- The outer IIFE is now `async` to support `await` for IndexedDB operations during boot.
+- `Store.save()` is async but called fire-and-forget (no await) from `saveDebounce` -- this is intentional per the PRD.
+- State merge logic is in `mergeState()` function, shared by both IndexedDB and localStorage fallback paths.
+- IndexedDB uses: database `cvz-export`, object store `state`, key `state`. Single blob per entry.
+- `Net._fetch()` is the single source of truth for HTTP retry/backoff/auth logic. `fetchJson` and `fetchBlob` are thin wrappers that set default credentials and parse the response.
+- Circuit breaker counter (`Net._consecutive429`) is in-memory only, not persisted. `S.run.backoffCount` is persisted and used for backoff delay calculation -- these are distinct counters.
+- Token dedup uses `Net._tokenPromise` with `.finally()` cleanup -- subsequent callers share the same in-flight promise.
+
+Squash from: 6704288fded1fd44ae08c041a6adc140d61664f7
+Final commit: 8daa6e9e361e211c366d656074cecf6770098605
+
+---
+
+## 2026-02-28 - US-001
+
+- Replaced `Store` object's localStorage backend with IndexedDB (`cvz-export` database, `state` object store)
+- Extracted state-merge logic into `mergeState()` function, used by both IndexedDB and localStorage fallback paths
+- Added `initIdb()`, `openIdb()`, `idbGet()`, `idbPut()`, `idbDelete()` helper functions
+- Made `Store.load()`, `Store.save()`, `Store.reset()` all async
+- Wrapped entire boot sequence in async IIFE: `(async () => { ... })()`
+- Added `await initIdb()` and `await Store.load()` in boot sequence
+- Made reset button handler async to properly `await Store.reset()` and `await Store.load()`
+- Added localStorage fallback with visible warning when IndexedDB is unavailable
+- Updated UI version line: shows "state in IndexedDB" or fallback warning
+- Bumped version string to `cvz-bookmarklet-2.0`
+- Files changed: `js/script.gpt.temp.js`
+- **Learnings for future iterations:**
+
+  - `saveDebounce` calls `Store.save(S)` without await -- this is the intended fire-and-forget pattern. Do not add await there.
+  - The `KEY` constant (`__cvz_export_state_v1__`) is kept for the localStorage fallback path only. IndexedDB uses its own key scheme.
+  - Process substitution (`<(...)`) doesn't work with `node --check` in this environment. Use a temp file instead: `sed '1s/^javascript: //' file.js > /tmp/check.js && node --check /tmp/check.js`.
+
+---
+
+## 2026-02-28 - US-002
+
+- Removed dead code: `const R = window.__CVZ_RESUME__ = window.__CVZ_RESUME__ || {};` (line 3)
+- Verified `scanConversations` already uses hardcoded `pageSize = 50` (was already correct from US-001 implementation)
+- Verified `S.settings.batch` is only used in `exportOneBatch` and UI batch input management -- not in scan pagination
+- Files changed: `js/script.gpt.temp.js`
+- **Learnings for future iterations:**
+
+  - The scan pagination was already fixed with the hardcoded `pageSize = 50` in the US-001 commit. US-002's acceptance criteria for scan pagination were already satisfied.
+
+---
+
+## 2026-02-28 - US-003
+
+- Created `Net._fetch(url, opts)` as the single source of truth for HTTP retry/backoff/auth logic
+- `fetchJson` and `fetchBlob` are now thin wrappers (~5 lines each) that set default credentials and call `_fetch` then parse the response
+- Added circuit breaker: `Net._consecutive429` counter increments on 429, resets to 0 on any 2xx, throws after 10 consecutive 429s
+- Added token dedup: `Net._tokenPromise` guards concurrent `getToken()` calls; subsequent callers share the same in-flight promise, cleared in `.finally()`
+- `_fetch` returns raw `Response`; `fetchJson` calls `.json()`, `fetchBlob` calls `.blob()`
+- Default credentials preserved: `fetchJson` defaults to `"same-origin"`, `fetchBlob` defaults to `"omit"`
+- Reduced file from 1039 to 1005 lines by eliminating ~55 lines of duplicated retry logic
+- Files changed: `js/script.gpt.temp.js`
+- **Learnings for future iterations:**
+
+  - `S.run.backoffCount` (persisted) and `Net._consecutive429` (in-memory) serve different purposes: backoff delay calculation vs. circuit breaker safety valve. Do not merge them.
+  - When `fetchBlob` callers pass explicit `credentials: "omit"`, the thin wrapper's `if (!opts.credentials)` check correctly skips the default assignment.
+
+---
+
+## 2026-02-28 - US-004
+
+- Copied `js/script.gpt.temp.js` to `js/script.js`, replacing the original JSZip-dependent script
+- Deleted `js/script.gpt.temp.js`
+- Rewrote `js/HOW_TO_USE.md`:
+  - Removed "Load JSZip" step (script has built-in ZipLite)
+  - Console usage: paste script, UI appears with resume state from last run
+  - Bookmarklet section: click bookmark, UI appears, no extra setup
+  - Added "Resume & Batch" section explaining IndexedDB persistence
+  - Updated "Notes" section: script handles 429s automatically with backoff
+  - Preserved "Importing into Convoviz" section (Option A and B)
+- Files changed: `js/script.js`, `js/script.gpt.temp.js` (deleted), `js/HOW_TO_USE.md`
+- **Learnings for future iterations:**
+
+  No significant learnings.
+
+---

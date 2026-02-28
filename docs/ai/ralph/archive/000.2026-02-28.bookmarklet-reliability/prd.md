@@ -24,7 +24,7 @@ However, the script has several reliability and correctness bugs that need fixin
 ## User Stories
 
 ### US-001: Replace localStorage with IndexedDB storage
-**Status:** pending
+**Status:** done
 **Description:** As a user with thousands of ChatGPT conversations, I want export state to be stored in IndexedDB so that my resume progress is never silently lost due to localStorage size limits.
 
 **Acceptance Criteria:**
@@ -38,7 +38,7 @@ However, the script has several reliability and correctness bugs that need fixin
 - [ ] The version string is bumped to `cvz-bookmarklet-2.0` to reflect the storage breaking change.
 
 ### US-002: Fix scan pagination and remove dead code
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want conversation scanning to always use an efficient fixed page size regardless of my batch setting, and I want no dead code in the script.
 
 **Acceptance Criteria:**
@@ -47,7 +47,7 @@ However, the script has several reliability and correctness bugs that need fixin
 - [ ] The dead code on line 3 (`const R = window.__CVZ_RESUME__ = window.__CVZ_RESUME__ || {};`) is removed entirely.
 
 ### US-003: Unify fetch layer with circuit breaker and token dedup
-**Status:** pending
+**Status:** done
 **Description:** As a developer maintaining this script, I want a single fetch implementation so that retry logic, backoff, and auth handling cannot drift between `fetchJson` and `fetchBlob`. As a user, I want the script to stop retrying after sustained rate limiting instead of looping forever, and I want concurrent workers to not trigger redundant auth refreshes.
 
 **Acceptance Criteria:**
@@ -64,7 +64,7 @@ However, the script has several reliability and correctness bugs that need fixin
 - [ ] The old `fetchJson` and `fetchBlob` methods (each ~55 lines of duplicated retry logic) are replaced by thin wrappers (~5 lines each) that call `_fetch` and parse the response.
 
 ### US-004: Replace script.js and update documentation
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want the fixed bookmarklet to be the primary script and the documentation to accurately describe the new workflow (no JSZip needed, resume/pause, batch settings).
 
 **Acceptance Criteria:**

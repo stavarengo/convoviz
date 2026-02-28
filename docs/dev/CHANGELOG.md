@@ -3,6 +3,10 @@
 > **Note**: This changelog is informal and incomplete. It tracks the primary record of all functional and behavioral updates to Convoviz.
 > **APPEND-ONLY. DO NOT EDIT, REWRITE, OR DELETE PAST ENTRIES. ALL NEW UPDATES MUST BE ADDED TO THE TOP.**
 
+## February 28, 2026
+
+- **Bookmarklet reliability overhaul**: Replaced `js/script.js` with the improved bookmarklet (formerly `js/script.gpt.temp.js`). The new script uses IndexedDB for state persistence, has a built-in ZIP implementation (no JSZip dependency), includes resume/pause, circuit breaker for rate limiting, and deduplicated token refresh. Updated `js/HOW_TO_USE.md` to reflect the new workflow.
+
 ## Recent Updates (February 23, 2026)
 
 - **Split conversation file support**: Loaders now accept both single-file (`conversations.json`) and split-file (`conversations-000.json` through `conversations-NNN.json`) ChatGPT export formats. ZIP validation, ZIP loading, and directory loading all handle both formats transparently, merging split files via `ConversationCollection.update()`.

@@ -1,25 +1,27 @@
 # ChatGPT Direct Export
 
-Export recent conversations and assets directly from your browser—no waiting for OpenAI emails. This method now packages everything into a single `.zip` file for convenience.
+Export your ChatGPT conversations and assets directly from your browser — no waiting for OpenAI emails. The script packages everything into a single `.zip` file, handles resume/pause, and persists state across page reloads. No external dependencies needed.
 
-## 📥 Usage (Console)
+## Usage (Console)
 1.  **Open ChatGPT**: Log in at [chatgpt.com](https://chatgpt.com).
 2.  **Open Console**: Press `F12` (or `Cmd + Opt + I`) and click the **Console** tab.
-3.  **Load JSZip**: Copy/paste the content of the JSZip library (e.g., from [cdnjs](https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js)) into the console and hit **Enter**.
-4.  **Run Script**: Copy/paste the entire content of [`script.js`](script.js) into the console and hit **Enter**.
-5.  **Export**: Enter the number of conversations in the popup and click **Start**.
-    *   *Result: A single `convoviz_export.zip` file will be downloaded.*
+3.  **Run Script**: Copy/paste the entire content of [`script.js`](script.js) into the console and hit **Enter**.
+4.  The export UI appears. If you had a previous export session, your progress is automatically restored.
+5.  Click **Start** to begin (or resume) exporting.
 
 ---
 
-## 🔖 Bookmarklet Method
-For frequent use, save a bookmark with the name "Convoviz Export" and the URL:
-`javascript:` + (paste `script.js` content here)
-*Note: You still need to run the JSZip script once per session if it hasn't been loaded.*
+## Bookmarklet Method
+For frequent use, save a bookmark with the name "Convoviz Export" and the URL set to the content of `script.js` (it already starts with `javascript:`). Click the bookmark on any ChatGPT page and the export UI appears — no extra setup needed.
 
 ---
 
-## 🛠️ Importing into Convoviz
+## Resume & Batch
+Export state persists via IndexedDB across page reloads and browser restarts. When you reopen the script, it picks up where it left off. To change the batch size, stop the export first, adjust the number, then start again.
+
+---
+
+## Importing into Convoviz
 
 ### Option A: Merge with Official Export (Recommended)
 Keep the `convoviz_export.zip` in your `Downloads` and run `convoviz` on your official ZIP. You'll be prompted to merge the recent data automatically.
@@ -32,6 +34,6 @@ convoviz --input ~/Downloads/convoviz_export.zip
 
 ---
 
-## ⚠️ Notes
-*   **Rate Limits**: Avoid fetching hundreds of chats at once.
-*   **Experimental**: Relies on internal APIs; if it breaks, [open an issue](https://github.com/mohamed-chs/convoviz/issues).
+## Notes
+*   **Rate Limits**: The script handles HTTP 429 responses automatically with exponential backoff and will stop retrying after sustained rate limiting (~12 minutes). You do not need to throttle manually.
+*   **Experimental**: Relies on internal ChatGPT APIs; if it breaks, [open an issue](https://github.com/mohamed-chs/convoviz/issues).
