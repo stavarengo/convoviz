@@ -1,7 +1,7 @@
 # PRD: Project & Knowledge File Export Support
 
 **Project:** Convoviz
-**Branch:**
+**Branch:** main
 
 ## Introduction
 
@@ -24,7 +24,7 @@ This PRD adds project conversation scanning, project knowledge file downloading,
 ## User Stories
 
 ### US-001: Scan project list and project conversations
-**Status:** pending
+**Status:** done
 **Description:** As a user with conversations organized in ChatGPT Projects, I want the bookmarklet to automatically discover all my projects and their conversations so that nothing is missed during export.
 
 **Acceptance Criteria:**
@@ -43,7 +43,7 @@ This PRD adds project conversation scanning, project knowledge file downloading,
 - [ ] If scanning a specific project's conversations fails, that project is skipped with a log entry and remaining projects continue scanning
 
 ### US-002: Export project conversations through existing pipeline
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want project conversations to export exactly like regular conversations so that the output format is consistent and the Python side can process them without changes.
 
 **Acceptance Criteria:**
@@ -54,7 +54,7 @@ This PRD adds project conversation scanning, project knowledge file downloading,
 - [ ] `computeChanges()` works correctly with the combined conversation list (regular + project) — no changes needed to the function itself, just the input includes project conversation IDs
 
 ### US-003: Download and export project knowledge files
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want project knowledge files (files attached to projects, like PDFs and docs used as project context) to be included in my export so I have a complete backup.
 
 **Acceptance Criteria:**
@@ -79,7 +79,7 @@ This PRD adds project conversation scanning, project knowledge file downloading,
 - [ ] Knowledge file stats (`kfBatches`, `kfMs`, `kfFiles`) are updated after each batch
 
 ### US-004: State and version updates
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need the state schema to support the new project and knowledge file tracking fields, with backward compatibility for existing v1 state.
 
 **Acceptance Criteria:**
@@ -92,7 +92,7 @@ This PRD adds project conversation scanning, project knowledge file downloading,
 - [ ] Old pending items without `gizmo_id` continue to work (treated as regular conversations)
 
 ### US-005: UI updates for project support
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want to see project and knowledge file progress in the bookmarklet UI so I know what's happening during export.
 
 **Acceptance Criteria:**

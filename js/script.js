@@ -1,7 +1,7 @@
 javascript: (async () => {
   try {
     const KEY = "__cvz_export_state_v1__";
-    const VER = "cvz-bookmarklet-2.0";
+    const VER = "cvz-bookmarklet-3.0";
     const now = () => Date.now();
     const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
     const safeJsonParse = (s, fb) => {
@@ -182,8 +182,9 @@ javascript: (async () => {
       }
     }
     const defaultState = () => ({
-      v: 1,
+      v: 2,
       ver: VER,
+      projects: [],
       settings: {
         batch: 50,
         conc: 3,
@@ -194,17 +195,25 @@ javascript: (async () => {
         exported: [],
         pending: [],
         dead: [],
-        failCounts: {}
+        failCounts: {},
+        kfExported: [],
+        kfPending: [],
+        kfDead: [],
+        kfFailCounts: {}
       },
       scan: {
         at: 0,
         total: 0,
+        totalProjects: 0,
         snapshot: []
       },
       stats: {
         batches: 0,
         batchMs: 0,
-        chats: 0
+        chats: 0,
+        kfBatches: 0,
+        kfMs: 0,
+        kfFiles: 0
       },
       run: {
         isRunning: false,
@@ -232,6 +241,7 @@ javascript: (async () => {
         ...d,
         ...s
       };
+      if (!Array.isArray(out.projects)) out.projects = [];
       out.settings = {
         ...d.settings,
         ...(s.settings || {})
@@ -244,6 +254,13 @@ javascript: (async () => {
         ...(d.progress.failCounts || {}),
         ...((s.progress || {}).failCounts || {})
       };
+      out.progress.kfFailCounts = {
+        ...(d.progress.kfFailCounts || {}),
+        ...((s.progress || {}).kfFailCounts || {})
+      };
+      if (!Array.isArray(out.progress.kfExported)) out.progress.kfExported = [];
+      if (!Array.isArray(out.progress.kfPending)) out.progress.kfPending = [];
+      if (!Array.isArray(out.progress.kfDead)) out.progress.kfDead = [];
       out.scan = {
         ...d.scan,
         ...(s.scan || {})
@@ -520,7 +537,7 @@ javascript: (async () => {
         const d = document.createElement("div");
         d.id = "cvz-resume-ui";
         d.style = "position:fixed;top:20px;right:20px;width:380px;max-width:calc(100vw - 40px);background:rgba(32,33,35,0.95);color:#ececf1;border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;z-index:2147483647;font-family:-apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 12px 24px rgba(0,0,0,0.35);backdrop-filter:blur(10px);";
-        d.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' + '<div style="font-weight:700;font-size:14px;">Convoviz Direct Export</div>' + '<button id="cvz-x" style="border:0;background:transparent;color:#ececf1;font-size:18px;line-height:18px;cursor:pointer;">×</button>' + '</div>' + '<div style="opacity:0.75;font-size:11px;margin-top:2px;">' + VER + (_useLocalStorage ? ' · \u26A0 localStorage fallback \u2014 large exports may lose state' : ' · state in IndexedDB') + '</div>' + '<div style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">' + '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;">' + '<div><b>Exported:</b> <span id="cvz-exported">0</span></div>' + '<div><b>Pending:</b> <span id="cvz-pending">0</span></div>' + '<div><b>Total:</b> <span id="cvz-total">?</span></div>' + '<div><b>Dead:</b> <span id="cvz-dead">0</span></div>' + '</div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.85;">' + 'Avg/chat: <span id="cvz-avgChat">-</span> · Avg/batch: <span id="cvz-avgBatch">-</span> · ETA: <span id="cvz-eta">-</span>' + '</div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.85;">Last stop: <span id="cvz-lastStop">-</span></div>' + '<div style="margin-top:4px;font-size:11px;opacity:0.85;">Last error: <span id="cvz-lastErr">-</span></div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.9;">Δ since last scan: <span id="cvz-delta">-</span></div>' + '<div style="margin-top:4px;font-size:11px;opacity:0.9;">Δ pending: <span id="cvz-pdelta">-</span></div>' + '</div>' + '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + '<label style="font-size:11px;opacity:0.9;">Batch</label>' + '<input id="cvz-batch" type="number" min="1" max="500" style="width:90px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;" />' + '<button id="cvz-rescan" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;">Rescan</button>' + '</div>' + '<div style="margin-top:10px;display:flex;gap:8px;">' + '<button id="cvz-start" style="flex:1;padding:8px 10px;border-radius:10px;border:1px solid rgba(16,163,127,0.6);background:rgba(16,163,127,0.15);color:#ececf1;cursor:pointer;font-weight:600;">Start</button>' + '<button id="cvz-stop" style="flex:1;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-weight:600;">Stop</button>' + '</div>' + '<div id="cvz-status" style="margin-top:10px;font-size:12px;">Idle</div>' + '<div style="height:8px;margin-top:6px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;">' + '<div id="cvz-bar" style="height:100%;width:0%;background:#10a37f;"></div>' + '</div>' + '<textarea id="cvz-log" readonly style="margin-top:10px;height:160px;width:100%;box-sizing:border-box;resize:vertical;font-size:11px;white-space:pre-wrap;background:rgba(0,0,0,0.25);color:#ececf1;border:1px solid rgba(255,255,255,0.08);padding:8px;border-radius:10px;font-family:inherit;outline:none;"></textarea>' + '<div style="margin-top:10px;display:flex;justify-content:space-between;gap:8px;">' + '<button id="cvz-reset" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Reset</button>' + '<button id="cvz-dlstate" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Export state</button>' + '</div>';
+        d.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' + '<div style="font-weight:700;font-size:14px;">Convoviz Direct Export</div>' + '<button id="cvz-x" style="border:0;background:transparent;color:#ececf1;font-size:18px;line-height:18px;cursor:pointer;">×</button>' + '</div>' + '<div style="opacity:0.75;font-size:11px;margin-top:2px;">' + VER + (_useLocalStorage ? ' · \u26A0 localStorage fallback \u2014 large exports may lose state' : ' · state in IndexedDB') + '</div>' + '<div style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">' + '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;">' + '<div><b>Exported:</b> <span id="cvz-exported">0</span></div>' + '<div><b>Pending:</b> <span id="cvz-pending">0</span></div>' + '<div><b>Total:</b> <span id="cvz-total">?</span></div>' + '<div><b>Dead:</b> <span id="cvz-dead">0</span></div>' + '</div>' + '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin-top:4px;">' + '<div><b>Projects:</b> <span id="cvz-projects">0</span></div>' + '<div><b>KF:</b> <span id="cvz-kf-count">0/0</span></div>' + '</div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.85;">' + 'Avg/chat: <span id="cvz-avgChat">-</span> · Avg/batch: <span id="cvz-avgBatch">-</span> · ETA: <span id="cvz-eta">-</span>' + '</div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.85;">Last stop: <span id="cvz-lastStop">-</span></div>' + '<div style="margin-top:4px;font-size:11px;opacity:0.85;">Last error: <span id="cvz-lastErr">-</span></div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.9;">Δ since last scan: <span id="cvz-delta">-</span></div>' + '<div style="margin-top:4px;font-size:11px;opacity:0.9;">Δ pending: <span id="cvz-pdelta">-</span></div>' + '</div>' + '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + '<label style="font-size:11px;opacity:0.9;">Batch</label>' + '<input id="cvz-batch" type="number" min="1" max="500" style="width:90px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;" />' + '<button id="cvz-rescan" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;">Rescan</button>' + '</div>' + '<div style="margin-top:10px;display:flex;gap:8px;">' + '<button id="cvz-start" style="flex:1;padding:8px 10px;border-radius:10px;border:1px solid rgba(16,163,127,0.6);background:rgba(16,163,127,0.15);color:#ececf1;cursor:pointer;font-weight:600;">Start</button>' + '<button id="cvz-stop" style="flex:1;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-weight:600;">Stop</button>' + '</div>' + '<div id="cvz-status" style="margin-top:10px;font-size:12px;">Idle</div>' + '<div style="height:8px;margin-top:6px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;">' + '<div id="cvz-bar" style="height:100%;width:0%;background:#10a37f;"></div>' + '</div>' + '<div id="cvz-kf-row" style="display:none;margin-top:4px;">' + '<div style="display:flex;align-items:center;gap:6px;">' + '<span id="cvz-kf-status" style="font-size:11px;opacity:0.85;white-space:nowrap;"></span>' + '</div>' + '<div style="height:6px;margin-top:3px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;">' + '<div id="cvz-kf-bar" style="height:100%;width:0%;background:#8b5cf6;"></div>' + '</div>' + '</div>' + '<textarea id="cvz-log" readonly style="margin-top:10px;height:160px;width:100%;box-sizing:border-box;resize:vertical;font-size:11px;white-space:pre-wrap;background:rgba(0,0,0,0.25);color:#ececf1;border:1px solid rgba(255,255,255,0.08);padding:8px;border-radius:10px;font-family:inherit;outline:none;"></textarea>' + '<div style="margin-top:10px;display:flex;justify-content:space-between;gap:8px;">' + '<button id="cvz-reset" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Reset</button>' + '<button id="cvz-dlstate" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Export state</button>' + '</div>';
         document.body.appendChild(d);
         this.container = d;
         d.querySelector("#cvz-x").onclick = () => {
@@ -608,6 +625,25 @@ javascript: (async () => {
         }
         const batchEl = this.container.querySelector("#cvz-batch");
         if (batchEl) batchEl.disabled = !!S.run.isRunning;
+        var projectCount = (S.projects || []).length || S.scan.totalProjects || 0;
+        this.container.querySelector("#cvz-projects").textContent = String(projectCount);
+        var kfExp = (S.progress.kfExported || []).length;
+        var kfPend = (S.progress.kfPending || []).length;
+        var kfTotal = kfExp + kfPend + (S.progress.kfDead || []).length;
+        this.container.querySelector("#cvz-kf-count").textContent = kfExp + "/" + kfTotal;
+        var kfRowEl = this.container.querySelector("#cvz-kf-row");
+        if (kfRowEl) {
+          var kfActive = S.run.isRunning && !pending && kfPend > 0;
+          kfRowEl.style.display = kfActive ? "block" : "none";
+          var kfBarEl = this.container.querySelector("#cvz-kf-bar");
+          if (kfBarEl) {
+            var kfDenom = kfExp + kfPend;
+            var kfPct = kfDenom ? (kfExp / kfDenom) * 100 : 0;
+            kfBarEl.style.width = clamp(kfPct, 0, 100).toFixed(1) + "%";
+          }
+          var kfStatusEl = this.container.querySelector("#cvz-kf-status");
+          if (kfStatusEl) kfStatusEl.textContent = "Knowledge files: " + kfExp + "/" + (kfExp + kfPend);
+        }
         this.renderLogs();
         const done = exported;
         const tot = S.scan.total ? S.scan.total : (exported + pending);
@@ -687,7 +723,7 @@ javascript: (async () => {
       let offset = 0;
       const items = [];
       while (true) {
-        if (UI) UI.setStatus("Scanning list… offset " + offset);
+        if (UI) UI.setStatus("Scanning conversations\u2026 offset " + offset);
         const data = await Net.fetchJson("/backend-api/conversations?offset=" + offset + "&limit=" + pageSize + "&order=updated", {
           signal,
           auth: true
@@ -708,6 +744,80 @@ javascript: (async () => {
         offset += got.length;
         if (got.length < pageSize) break;
         if (data.total && offset >= data.total) break;
+      }
+      return items;
+    };
+    const scanProjects = async (signal, onProject) => {
+      let cursor = null;
+      let page = 1;
+      const projects = [];
+      while (true) {
+        if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
+        let url = "/backend-api/gizmos/snorlax/sidebar?owned_only=true&conversations_per_gizmo=0";
+        if (cursor) url += "&cursor=" + encodeURIComponent(cursor);
+        if (UI) UI.setStatus("Scanning projects\u2026 (page " + page + ")");
+        const data = await Net.fetchJson(url, { signal, auth: true });
+        const gizmos = (data && data.items) || [];
+        for (const g of gizmos) {
+          const def = (g && g.resource && g.resource.gizmo) || g.gizmo || g;
+          const gizmoId = def.id || (g.resource && g.resource.gizmo && g.resource.gizmo.id) || null;
+          if (!gizmoId) continue;
+          const filesList = [];
+          const context = (g.resource && g.resource.context) || {};
+          const contextFiles = context.files || [];
+          for (const f of contextFiles) {
+            if (f && f.file_id) {
+              filesList.push({
+                fileId: f.file_id,
+                name: f.name || "",
+                type: f.type || "",
+                size: f.size || 0
+              });
+            }
+          }
+          const proj = {
+            gizmoId: gizmoId,
+            name: def.display && def.display.name || def.name || "",
+            emoji: def.display && def.display.profile_emoji || "",
+            theme: def.display && def.display.accent_color || "",
+            instructions: def.instructions || "",
+            memoryEnabled: !!(context.memory_enabled),
+            memoryScope: context.memory_scope || "",
+            files: filesList,
+            raw: g.resource || g
+          };
+          projects.push(proj);
+          if (onProject) onProject(proj);
+        }
+        cursor = (data && data.cursor) || null;
+        if (!cursor) break;
+        page++;
+      }
+      return projects;
+    };
+    const scanProjectConversations = async (gizmoId, signal, onPage) => {
+      let cursor = "0";
+      const items = [];
+      while (true) {
+        if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
+        const url = "/backend-api/gizmos/" + encodeURIComponent(gizmoId) + "/conversations?cursor=" + encodeURIComponent(cursor);
+        const data = await Net.fetchJson(url, { signal, auth: true });
+        const got = (data && data.items) || [];
+        if (!got.length) break;
+        const pageItems = [];
+        for (const it of got) {
+          const item = {
+            id: it.id,
+            title: it.title || "",
+            update_time: it.update_time || it.updated_time || 0,
+            gizmo_id: gizmoId
+          };
+          items.push(item);
+          pageItems.push(item);
+        }
+        if (onPage) onPage(pageItems);
+        cursor = (data && data.cursor) || null;
+        if (!cursor) break;
       }
       return items;
     };
@@ -764,10 +874,11 @@ javascript: (async () => {
             assertOnChatGPT();
             S.run.lastPhase = "scan";
             S.scan.total = 0;
+            S.scan.totalProjects = 0;
             S.changes = { at: 0, newChats: 0, removedChats: 0, updatedChats: 0, newPending: 0, pendingDelta: 0 };
             saveDebounce(true);
             if (UI) UI.renderAll();
-            addLog("Rescan started…");
+            addLog("Rescan started\u2026");
             const exportedSet = new Set(S.progress.exported || []);
             const deadSet = new Set((S.progress.dead || []).map(x => x.id));
             const pendingSet = new Set((S.progress.pending || []).map(x => x.id));
@@ -786,15 +897,67 @@ javascript: (async () => {
               }
             };
             const items = await scanConversations(ac.signal, onPage);
-            S.changes = computeChanges(S.scan.snapshot, items, S.progress.pending);
+            addLog("Regular scan done. Found " + items.length + " conversations.");
+            let projectConvItems = [];
+            try {
+              if (UI) UI.setStatus("Scanning projects\u2026");
+              const projects = await scanProjects(ac.signal, null);
+              S.projects = projects;
+              S.scan.totalProjects = projects.length;
+              saveDebounce(false);
+              addLog("Found " + projects.length + " projects.");
+              for (let pi = 0; pi < projects.length; pi++) {
+                const proj = projects[pi];
+                if (ac.signal && ac.signal.aborted) throw new DOMException("Aborted", "AbortError");
+                try {
+                  if (UI) UI.setStatus("Scanning project chats: " + proj.name + " (" + (pi + 1) + "/" + projects.length + ")");
+                  const projItems = await scanProjectConversations(proj.gizmoId, ac.signal, onPage);
+                  for (const it of projItems) projectConvItems.push(it);
+                  addLog("Project " + proj.name + ": " + projItems.length + " conversations.");
+                } catch (pe) {
+                  if (pe && pe.name === "AbortError") throw pe;
+                  addLog("\u26A0 Failed to scan project " + proj.name + ": " + (pe && pe.message || pe));
+                  console.warn("convoviz: project conversation scan failed for " + proj.name, pe);
+                }
+              }
+            } catch (projErr) {
+              if (projErr && projErr.name === "AbortError") throw projErr;
+              addLog("\u26A0 Project scan failed, continuing with regular conversations only: " + (projErr && projErr.message || projErr));
+              console.warn("convoviz: project sidebar scan failed", projErr);
+            }
+            const kfExportedSet = new Set((S.progress.kfExported || []).map(function(x) { return x.fileId; }));
+            const kfDeadSet = new Set((S.progress.kfDead || []).map(function(x) { return x.fileId; }));
+            const kfPendingNew = [];
+            const kfPendingIds = new Set();
+            for (const proj of (S.projects || [])) {
+              for (const f of (proj.files || [])) {
+                if (!kfExportedSet.has(f.fileId) && !kfDeadSet.has(f.fileId) && !kfPendingIds.has(f.fileId)) {
+                  kfPendingNew.push({
+                    projectId: proj.gizmoId,
+                    projectName: proj.name,
+                    fileId: f.fileId,
+                    fileName: f.name,
+                    fileType: f.type,
+                    fileSize: f.size
+                  });
+                  kfPendingIds.add(f.fileId);
+                }
+              }
+            }
+            S.progress.kfPending = kfPendingNew;
+            saveDebounce(false);
+            if (kfPendingNew.length) addLog("Knowledge files: " + kfPendingNew.length + " pending.");
+            const allItems = items.concat(projectConvItems);
+            S.changes = computeChanges(S.scan.snapshot, allItems, S.progress.pending);
             S.scan = {
               at: now(),
-              total: items.length,
-              snapshot: items.map(x => [x.id, x.update_time || 0])
+              total: allItems.length,
+              totalProjects: S.scan.totalProjects || 0,
+              snapshot: allItems.map(x => [x.id, x.update_time || 0])
             };
             saveDebounce(true);
             if (UI) UI.setStatus("Rescan done.");
-            addLog("Rescan done. Total " + items.length + ", pending " + S.progress.pending.length + ".");
+            addLog("Rescan done. Total " + allItems.length + " (" + items.length + " regular + " + projectConvItems.length + " project), pending " + S.progress.pending.length + ".");
             if (UI) UI.renderAll();
           } catch (e) {
             if (e && e.name === "AbortError") {
@@ -853,7 +1016,7 @@ javascript: (async () => {
           if (UI) UI.setStatus("Running…");
           while (S.run.isRunning) {
             if (!S.progress.pending.length && this.scanPromise) {
-              if (UI) UI.setStatus("Waiting for scan to find conversations…");
+              if (UI) UI.setStatus("Waiting for scan to find conversations\u2026");
               await sleep(500, ac.signal);
               continue;
             }
@@ -861,8 +1024,17 @@ javascript: (async () => {
             await this.exportOneBatch(ac.signal);
             if (this.stopRequested) break;
           }
-          if (UI) UI.setStatus(S.progress.pending.length ? "Paused." : "✅ All done.");
-          addLog(S.progress.pending.length ? "Paused." : "All done.");
+          if (!this.stopRequested && S.progress.kfPending && S.progress.kfPending.length) {
+            addLog("Conversations done. Starting knowledge file export\u2026");
+            while (S.run.isRunning) {
+              if (!S.progress.kfPending.length || this.stopRequested) break;
+              await this.exportKnowledgeBatch(ac.signal);
+              if (this.stopRequested) break;
+            }
+          }
+          const anyPending = S.progress.pending.length || (S.progress.kfPending || []).length;
+          if (UI) UI.setStatus(anyPending ? "Paused." : "\u2705 All done.");
+          addLog(anyPending ? "Paused." : "All done.");
         } catch (e) {
           if (e && e.name === "AbortError") {
             if (UI) UI.setStatus("Paused.");
@@ -915,7 +1087,8 @@ javascript: (async () => {
         const worker = async () => {
           while (queue.length && !(signal && signal.aborted)) {
             const item = queue.shift();
-            const title = item.title || item.id;
+            const projName = item.gizmo_id ? ((S.projects || []).find(function(p) { return p.gizmoId === item.gizmo_id; }) || {}).name : null;
+            const title = projName ? "[" + projName + "] " + (item.title || item.id) : (item.title || item.id);
             if (UI) UI.setStatus("Fetching: " + title);
             const t0 = now();
             try {
@@ -1016,7 +1189,16 @@ javascript: (async () => {
             files_saved: filesSaved,
             files_failed: filesFailed,
             batch_wall_ms: batchWall,
-            pending_before: S.progress.pending.length
+            pending_before: S.progress.pending.length,
+            projects: (S.projects || []).map(function(p) {
+              return {
+                gizmo_id: p.gizmoId,
+                name: p.name,
+                emoji: p.emoji,
+                theme: p.theme,
+                knowledge_file_count: (p.files || []).length
+              };
+            })
           };
           zip.addBytes("conversations.json", enc(JSON.stringify(successes)));
           zip.addBytes("convoviz_export_meta.json", enc(JSON.stringify(meta, null, 2)));
@@ -1043,6 +1225,163 @@ javascript: (async () => {
           if (UI) UI.setStatus("Batch had 0 exports (see log).");
           if (moved.requeueCount && moved.requeueCount === batchItems.length) {
             addLog("No progress this batch; pausing to avoid infinite retries.");
+            this.stopRequested = true;
+            if (this.abort) this.abort.abort();
+          }
+        }
+        if (UI) UI.renderAll();
+      },
+      async exportKnowledgeBatch(signal) {
+        const batchSize = clamp(parseInt(S.settings.batch, 10) || 50, 1, 500);
+        const conc = clamp(parseInt(S.settings.conc, 10) || 3, 1, 8);
+        const pause = clamp(parseInt(S.settings.pause, 10) || 300, 0, 5000);
+        const batchItems = S.progress.kfPending.slice(0, batchSize);
+        if (!batchItems.length) return;
+        const zip = new ZipLite();
+        const successes = [];
+        const successIds = new Set();
+        const failInfo = {};
+        const projectsInBatch = new Set();
+        const queue = batchItems.slice();
+        const tBatchStart = now();
+        addLog("KF batch starting: " + batchItems.length + " files (conc " + conc + ").");
+        S.run.lastPhase = "kf";
+        saveDebounce(false);
+        const worker = async () => {
+          while (queue.length && !(signal && signal.aborted)) {
+            const item = queue.shift();
+            const label = "[" + item.projectName + "] " + item.fileName;
+            if (UI) UI.setStatus("KF: Downloading " + label);
+            const t0 = now();
+            try {
+              const meta = await Net.fetchJson("/backend-api/files/download/" + encodeURIComponent(item.fileId) + "?gizmo_id=" + encodeURIComponent(item.projectId) + "&inline=false", {
+                signal,
+                auth: true
+              });
+              if (meta && meta.status === "error" && meta.error_code === "file_not_found") {
+                S.progress.kfDead = (S.progress.kfDead || []).concat([{
+                  ...item,
+                  lastError: "file_not_found"
+                }]).slice(-500);
+                S.progress.kfFailCounts[item.fileId] = 3;
+                failInfo[item.fileId] = "file_not_found";
+                addLog("\u2717 KF dead-lettered (not found): " + label);
+                if (UI) UI.renderAll();
+                if (pause) await sleep(pause, signal).catch(function() {});
+                continue;
+              }
+              if (meta && meta.download_url) {
+                const isSameOrigin = meta.download_url.startsWith("/") || meta.download_url.startsWith(location.origin);
+                const blob = await Net.fetchBlob(meta.download_url, {
+                  signal,
+                  auth: false,
+                  credentials: isSameOrigin ? "same-origin" : "omit"
+                });
+                const fname = "projects/" + item.projectId + "/files/" + item.fileId + "_" + sanitizeName(item.fileName);
+                await zip.addBlob(fname, blob);
+                successes.push(item);
+                successIds.add(item.fileId);
+                projectsInBatch.add(item.projectId);
+                addLog("\u2713 KF " + label + " (" + fmtMs(now() - t0) + ")");
+              } else {
+                failInfo[item.fileId] = "no download_url in response";
+                addLog("\u2717 KF no download_url: " + label);
+              }
+            } catch (e) {
+              if (e && e.name === "AbortError") throw e;
+              const msg = (e && e.message) || String(e);
+              failInfo[item.fileId] = msg;
+              addLog("\u2717 KF " + label + ": " + msg);
+            }
+            if (UI) UI.renderAll();
+            if (pause) await sleep(pause, signal).catch(function() {});
+          }
+        };
+        const workers = [];
+        for (let i = 0; i < Math.min(conc, queue.length || 1); i++) workers.push(worker());
+        try {
+          await Promise.all(workers);
+        } catch (e) {
+          if (!(e && e.name === "AbortError")) throw e;
+        }
+        const batchWall = now() - tBatchStart;
+        const updateKfPendingAfterBatch = () => {
+          const rest = S.progress.kfPending.slice(batchItems.length);
+          const requeue = [];
+          const dead = [];
+          const fc = S.progress.kfFailCounts || {};
+          for (const it of batchItems) {
+            if (successIds.has(it.fileId)) continue;
+            if (fc[it.fileId] >= 3) continue;
+            const n = (fc[it.fileId] || 0) + 1;
+            fc[it.fileId] = n;
+            if (n >= 3) dead.push({
+              ...it,
+              lastError: failInfo[it.fileId] || "failed"
+            });
+            else requeue.push(it);
+          }
+          if (dead.length) {
+            S.progress.kfDead = (S.progress.kfDead || []).concat(dead).slice(-500);
+            addLog("Moved " + dead.length + " knowledge files to dead-letter after 3 failures.");
+          }
+          S.progress.kfFailCounts = fc;
+          S.progress.kfPending = rest.concat(requeue);
+          return {
+            requeueCount: requeue.length,
+            deadCount: dead.length
+          };
+        };
+        if (successes.length) {
+          if (UI) UI.setStatus("Building KF ZIP (" + successes.length + " files)\u2026");
+          for (const projId of projectsInBatch) {
+            const proj = (S.projects || []).find(function(p) { return p.gizmoId === projId; });
+            if (proj && proj.raw) {
+              zip.addBytes("projects/" + projId + "/project.json", enc(JSON.stringify(proj.raw, null, 2)));
+            }
+          }
+          const meta = {
+            created_at: new Date().toISOString(),
+            tool: VER,
+            type: "knowledge_files",
+            files_exported: successes.length,
+            batch_wall_ms: batchWall,
+            kf_pending_before: batchItems.length,
+            projects: (S.projects || []).map(function(p) {
+              return {
+                gizmo_id: p.gizmoId,
+                name: p.name,
+                emoji: p.emoji,
+                theme: p.theme,
+                knowledge_file_count: (p.files || []).length
+              };
+            })
+          };
+          zip.addBytes("convoviz_export_meta.json", enc(JSON.stringify(meta, null, 2)));
+          const blob = zip.buildBlob();
+          const ts = new Date();
+          const pad = function(n) { return String(n).padStart(2, "0"); };
+          const name = "convoviz_knowledge_" + ts.getFullYear() + pad(ts.getMonth() + 1) + pad(ts.getDate()) + "_" + pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds()) + "_n" + successes.length + ".zip";
+          Net.download(blob, name);
+          S.progress.kfExported = (S.progress.kfExported || []).concat(successes);
+          S.stats.kfBatches = (S.stats.kfBatches || 0) + 1;
+          S.stats.kfMs = (S.stats.kfMs || 0) + batchWall;
+          S.stats.kfFiles = (S.stats.kfFiles || 0) + successes.length;
+          const moved = updateKfPendingAfterBatch();
+          saveDebounce(true);
+          addLog("KF batch done: exported " + successes.length + " files in " + fmtMs(batchWall) + ". KF pending " + S.progress.kfPending.length + ".");
+          if (moved.requeueCount === batchItems.length) {
+            addLog("No KF progress detected; pausing to avoid infinite retries.");
+            this.stopRequested = true;
+            if (this.abort) this.abort.abort();
+          }
+        } else {
+          const moved = updateKfPendingAfterBatch();
+          saveDebounce(true);
+          addLog("KF batch ended with 0 exports (" + fmtMs(batchWall) + "). Requeued " + moved.requeueCount + ", dead " + moved.deadCount + ".");
+          if (UI) UI.setStatus("KF batch had 0 exports (see log).");
+          if (moved.requeueCount && moved.requeueCount === batchItems.length) {
+            addLog("No KF progress this batch; pausing to avoid infinite retries.");
             this.stopRequested = true;
             if (this.abort) this.abort.abort();
           }

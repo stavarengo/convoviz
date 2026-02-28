@@ -1,0 +1,99 @@
+# PRD: Project & Knowledge File Export Support
+
+Base commit: 6f579952aafdd5e7ba4dabf2fd28f82c1bcee513
+Final commit: d51e867
+
+## Codebase Patterns
+
+- `js/script.js` is a standalone browser bookmarklet -- no Node.js, no test framework, no build system. Syntax-check with `node --check` after stripping the `javascript: ` prefix: `sed '1s/^javascript: //' js/script.js > /tmp/check.js && node --check /tmp/check.js`.
+- State merge logic is in `mergeState()`. New top-level fields need a guard in `mergeState()` if they aren't a simple primitive (e.g., `if (!Array.isArray(out.projects)) out.projects = [];`).
+- Cursor-based pagination (projects, project conversations) uses `cursor` field in response; `null` means last page. Offset-based pagination (regular conversations) uses `offset`/`total`.
+- The `onPage` callback is the shared mechanism for adding items to `S.progress.pending` with deduplication via `pendingSet`.
+- Graceful degradation pattern: inner try/catch that rethrows AbortError but logs+continues for all other errors.
+- New state arrays in `progress` need both a `mergeState()` guard (`if (!Array.isArray(...))`) and, if they use a fail-count map, an explicit object spread merge.
+- Batch export functions follow a standard structure: batchItems from pending, queue+workers, success/fail tracking, updatePendingAfterBatch cleanup, ZIP build+download, stats update.
+
+Squash from: 6f579952aafdd5e7ba4dabf2fd28f82c1bcee513
+
+---
+
+## 2026-02-28 - US-001
+
+- Added `scanProjects(signal, onProject)` function: paginates through `/backend-api/gizmos/snorlax/sidebar?owned_only=true&conversations_per_gizmo=0` using cursor-based pagination, extracts project definitions with shape `{gizmoId, name, emoji, theme, instructions, memoryEnabled, memoryScope, files: [{fileId, name, type, size}], raw}`
+- Added `scanProjectConversations(gizmoId, signal, onPage)` function: paginates through `/backend-api/gizmos/{gizmoId}/conversations?cursor=0` using cursor-based pagination, normalizes each item to `{id, title, update_time, gizmo_id}`
+- Updated `defaultState()`: added `projects: []` top-level field, `scan.totalProjects: 0`
+- Updated `mergeState()`: added guard for `projects` array
+- Updated `rescan()`: orchestrates regular scan -> project list scan -> per-project conversation scan; shares `onPage` callback and `pendingSet` for deduplication
+- Project conversations stored in `S.progress.pending` with `gizmo_id` field, regular items have no `gizmo_id`
+- `S.scan.total` includes both regular and project conversation counts
+- `S.scan.snapshot` includes all conversation IDs from both sources
+- Status text: "Scanning conversations... offset N" -> "Scanning projects... (page N)" -> "Scanning project chats: Name (X/Y)"
+- Sidebar endpoint failure logs warning, continues with regular-only export
+- Per-project conversation scan failure skips that project, continues with remaining
+- Files changed: `js/script.js`
+- **Learnings for future iterations:**
+
+  - The project sidebar response has nested structure: `items[].resource.gizmo` for the gizmo definition, `items[].resource.context.files` for knowledge files. Access patterns need defensive chaining since the exact nesting may vary.
+  - Project conversation endpoint uses cursor starting at `"0"` (string), not `null`. First page uses `cursor=0`, subsequent pages use the cursor from the response.
+  - AbortError must always be rethrown in catch blocks during scan phases -- swallowing it would prevent the stop button from working.
+
+---
+
+## 2026-02-28 - US-002
+
+- Updated `exportOneBatch` worker: when a pending item has `gizmo_id`, the display title is prefixed with `[ProjectName]` (looked up from `S.projects`). All status messages (Fetching, Media, Downloading file, Saved) and log entries use the project-prefixed title automatically since they reference the same `title` variable.
+- Updated `convoviz_export_meta.json`: the meta object now includes a `projects` array with lightweight project info `{gizmo_id, name, emoji, theme, knowledge_file_count}` mapped from `S.projects`.
+- AC1 (fetch via same endpoint), AC2 (extractFileRefs works), AC5 (computeChanges works) required no code changes -- verified by code inspection.
+- Files changed: `js/script.js`
+- **Learnings for future iterations:**
+
+  - No significant learnings.
+
+---
+
+## 2026-02-28 - US-003
+
+- Added state fields to `defaultState()`: `progress.kfExported`, `progress.kfPending`, `progress.kfDead`, `progress.kfFailCounts` and `stats.kfBatches`, `stats.kfMs`, `stats.kfFiles`
+- Updated `mergeState()`: explicit merge for `kfFailCounts` (same pattern as `failCounts`), plus array guards for `kfExported`, `kfPending`, `kfDead`
+- Updated `rescan()`: after scanning projects, rebuilds `kfPending` from `S.projects` file lists, skipping files already in `kfExported` or `kfDead`
+- Added `exportKnowledgeBatch(signal)` function mirroring `exportOneBatch()` patterns: batch/conc/pause settings, concurrent workers, retry with 3-attempt dead-letter
+- Download URL: `GET /backend-api/files/download/{fileId}?gizmo_id={projectId}&inline=false`
+- `file_not_found` errors are dead-lettered immediately (no retry), other HTTP errors follow normal 3-retry pattern
+- ZIP structure: `projects/{projectId}/files/{fileId}_{sanitizedName}` for files, `projects/{projectId}/project.json` for project definitions
+- `convoviz_export_meta.json` included in each KF ZIP with batch stats
+- ZIP filename pattern: `convoviz_knowledge_YYYYMMDD_HHMMSS_nN.zip`
+- Updated `Exporter.start()` main loop: scan -> conversation batches -> knowledge file batches -> done
+- Stop mid-knowledge-download preserves `kfPending` for resume; conversations are checked first on restart
+- Files changed: `js/script.js`
+- **Learnings for future iterations:**
+
+  - The `kfExported` array stores full item objects (not just IDs like conversation `exported`), because the rescan rebuild needs to match on `fileId`. This is a deliberate divergence from the conversation pattern.
+  - When adding a new batch export function, the `file_not_found` immediate dead-letter must also mark `kfFailCounts[fileId] = 3` to prevent `updateKfPendingAfterBatch` from double-counting the item.
+
+---
+
+## 2026-02-28 - US-004
+
+- Bumped `VER` from `"cvz-bookmarklet-2.0"` to `"cvz-bookmarklet-3.0"`
+- Bumped `defaultState().v` from `1` to `2`
+- Verified all other AC already satisfied by US-001/US-003: `projects: []`, `scan.totalProjects: 0`, `gizmo_id` on pending items, backward-compatible `mergeState()` for v1 state
+- Used a temporary Node.js test script for TDD verification (RED/GREEN confirmed), then removed it since the project has no test framework
+- Files changed: `js/script.js`
+- **Learnings for future iterations:**
+
+  - No significant learnings.
+
+---
+
+## 2026-02-28 - US-005
+
+- Added "Projects: N" and "KF: X/Y" stats row to the UI stats panel, below the existing Exported/Pending/Total/Dead row
+- Added secondary purple progress bar (`#8b5cf6`) with container `cvz-kf-row` (hidden by default), bar `cvz-kf-bar`, and status text `cvz-kf-status`
+- Updated `renderAll()` to: update project count from `S.projects.length` or `S.scan.totalProjects`, update KF stats showing exported/total, toggle secondary bar visibility (shown only when running in KF phase with no pending conversations), update secondary bar percentage as `kfExported / (kfExported + kfPending) * 100`
+- Main green progress bar remains conversation-only: `exported / total * 100`
+- Files changed: `js/script.js`
+- **Learnings for future iterations:**
+
+  - The KF count display shows `exported/total` where total includes dead-lettered files (exported + pending + dead), giving users visibility into how many files were attempted. The secondary bar percentage excludes dead files (exported / (exported + pending)) since dead files are no longer actionable.
+
+---
