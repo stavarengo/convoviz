@@ -17,3 +17,5 @@ tmp/
 # Ralph orchestrator worktrees and hint symlinks
 .claude/worktrees/
 docs/ai/ralph/current
+
+.vscode/*.local.json
