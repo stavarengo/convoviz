@@ -901,7 +901,9 @@ javascript: (async () => {
             let projectConvItems = [];
             try {
               if (UI) UI.setStatus("Scanning projects\u2026");
-              const projects = await scanProjects(ac.signal, null);
+              const projects = await scanProjects(ac.signal, function(proj) {
+                if (UI) UI.setStatus("Scanning projects\u2026 found " + proj.name);
+              });
               S.projects = projects;
               S.scan.totalProjects = projects.length;
               saveDebounce(false);
@@ -1270,7 +1272,7 @@ javascript: (async () => {
                 if (pause) await sleep(pause, signal).catch(function() {});
                 continue;
               }
-              if (meta && meta.download_url) {
+              if (meta && meta.status === "success" && meta.download_url) {
                 const isSameOrigin = meta.download_url.startsWith("/") || meta.download_url.startsWith(location.origin);
                 const blob = await Net.fetchBlob(meta.download_url, {
                   signal,
@@ -1396,7 +1398,7 @@ javascript: (async () => {
       }, 800);
     }
     S.logs = [];
-    addLog("v10");
+    addLog(VER);
     addLog("UI ready. Exported " + (S.progress.exported || []).length + ", pending " + (S.progress.pending || []).length + ".");
     UI.renderAll();
     UI.ensureTick();
