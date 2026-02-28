@@ -11,3 +11,5 @@ conversation_list.json
 conversation_list.txt
 test-output/
 # etc..
+
+tmp/
