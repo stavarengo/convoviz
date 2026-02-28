@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<head><title>Convoviz Bookmarklet Test Harness</title></head>
+<body>
+<div id="test-root"></div>
+<script>
+  // Stub IndexedDB so the bookmarklet falls back to localStorage
+  // (simpler for testing)
+  window.__cvz_test_harness = true;
+</script>
+</body>
+</html>

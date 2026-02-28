@@ -1,0 +1,98 @@
+## Codebase Patterns
+
+- The bookmarklet (`js/script.js`) is a single-file IIFE starting with `javascript:`. All HTML is string concatenation (no template literals). CSS is inline styles.
+- Playwright tests for the bookmarklet use a test harness (`js/tests/harness.html`) and inject the bookmarklet by stripping the `javascript:` prefix and evaluating the code in the page context.
+- The bookmarklet UI object is `UIImpl` (assigned to `UI` global). Key methods: `inject()`, `setStatus()`, `setBar()`, `renderAll()`, `renderLogs()`, `ensureTick()`.
+- `renderAll()` is called on a 1-second interval timer (`ensureTick`) and also manually after state changes. It updates stat counters and the progress bar.
+- The panel uses `data-testid` attributes for test selectors on container elements (e.g., `data-testid="cvz-stats"`, `data-testid="cvz-controls"`).
+- `#cvz-bar` is an inline thin progress bar inside the stats container (not standalone). It has `width:0%` by default, so Playwright considers it invisible - test the parent track element visibility instead.
+- The `TaskList` object is exposed on `window.__cvz_TaskList` for testing. `UIImpl` is exposed on `window.__cvz_UI`. `Exporter`, state (`S`), and `Net` are exposed as `window.__cvz_Exporter`, `window.__cvz_S`, `window.__cvz_Net`. All are accessible from Playwright `page.evaluate()`.
+- `TaskList.render()` uses a dirty flag pattern - only re-renders when `_dirty` is true. `add()` and `update()` set `_dirty = true`. `render()` clears it.
+- Task detail sub-lines (e.g., "downloading 2/5 files") are rendered as sibling `<div>` elements with class `cvz-task-detail`, not nested inside the task's main `<div>`. Use `.locator(".cvz-task-detail")` to find them, not by looking inside `.cvz-task-active`.
+- For tests that call `Exporter` methods (rescan, exportOneBatch), the page must be served from `chatgpt.com` origin to pass `assertOnChatGPT()`. Use `page.route("https://chatgpt.com/...", ...)` with Playwright route interception. Also mock all `/backend-api/` routes to avoid real network calls.
+
+---
+
+## 2026-02-28 - US-001
+
+- Rebuilt panel layout with compact stats (2 rows instead of 12 lines of verbose stats)
+- Removed: Avg/chat, Avg/batch, ETA, Last stop, Last error, Delta since last scan, Delta pending, Total count
+- Merged controls (Batch, Rescan, Start, Stop) into a single row (was two separate rows)
+- Moved progress bar inline into stats row 1 (was standalone full-width bar)
+- Removed KF purple progress bar and row (KF progress now shown as text: `KF: N/N`)
+- Added empty `#cvz-tasks` container (180px, scrollable) between controls and log
+- Shrunk log textarea from 160px to 80px
+- Changed version to `cvz-bookmarklet-4.0`
+- Added fallback status area (`#cvz-status`) as a small text element
+- Updated `renderAll()` to only populate compact stat spans
+
+- Files changed:
+  - `js/script.js` - Panel layout rebuild, renderAll cleanup, version bump
+  - `js/tests/panel-layout.spec.js` - 15 Playwright tests for US-001
+  - `js/tests/harness.html` - Test harness HTML for bookmarklet injection
+  - `js/tests/screenshot.js` - Screenshot utility for visual verification
+  - `playwright.config.js` - Playwright configuration
+  - `.gitignore` - Added node_modules, test-results, package files
+
+- **Learnings for future iterations:**
+
+  - The bookmarklet's `#cvz-bar` element at `width:0%` is considered hidden by Playwright. Test the parent track container's visibility instead, or use `toHaveCount(1)` to verify existence.
+  - To inject the bookmarklet in Playwright tests, strip the `javascript:` prefix and pass to `page.evaluate()`. The IIFE runs synchronously enough that `waitForSelector("#cvz-resume-ui")` catches the panel.
+  - Python tests (`uv run pytest`) can't run in this worktree environment due to network restrictions on package downloads. The bookmarklet is pure JS and has no Python test coverage.
+  - The `fmtTs` utility function is now unused after removing `#cvz-lastStop` rendering, but kept since it's harmless.
+
+---
+
+## 2026-02-28 - US-002
+
+- Implemented TaskList data model with `add()`, `update()`, `getVisible()`, `render()` methods
+- Task data model: `id`, `type`, `label`, `projectName`, `status`, `detail`, `error`, `startedAt`, `completedAt`
+- Sliding window in `getVisible()`: all failed + all active + last 30 done + next 10 queued
+- Tasks render inside `#cvz-tasks` with per-status styling:
+  - `queued`: dot prefix, dimmed (opacity 0.5)
+  - `active`: spinning icon (`@keyframes cvz-spin`), green text (#10a37f)
+  - `done`: checkmark prefix, muted (opacity 0.6)
+  - `failed`: X prefix, red text (#ef4444), error in parentheses
+- Active tasks with detail show sub-line with arrow prefix
+- Project context shown as `[ProjectName]` prefix
+- CSS `@keyframes cvz-spin` animation injected via `<style>` element
+- Auto-scroll: scrolls to bottom on new tasks, stops when user scrolls up
+- Efficient rendering via dirty flag pattern
+- `UI.renderAll()` calls `TaskList.render()` if dirty
+- Exposed `TaskList` on `window.__cvz_TaskList` and `UIImpl` on `window.__cvz_UI` for testing
+
+- Files changed:
+  - `js/script.js` - Added TaskList object, CSS spin animation, wired to renderAll()
+  - `js/tests/task-list.spec.js` - 17 Playwright tests for US-002
+
+- **Learnings for future iterations:**
+
+  - Task detail sub-lines render as sibling divs (`.cvz-task-detail`), not nested inside the task div. Tests must query them as siblings, not children of `.cvz-task-active`.
+  - The bookmarklet worktree environment has no `package.json` initially. Run `npm init -y && npm install --save-dev @playwright/test && npx playwright install chromium` to set up tests.
+
+---
+
+## 2026-02-28 - US-003
+
+- Wired TaskList to export pipeline: `exportOneBatch`, `exportKnowledgeBatch`, and `rescan`
+- `exportOneBatch` worker: creates `conv-{id}` task with `type: "conversation"`, sets detail to "fetching conversation" then "downloading N/M files", updates to done/failed
+- `exportKnowledgeBatch` worker: creates `kf-{fileId}` task with `type: "knowledge"`, `projectName` from item, updates to done/failed
+- `rescan`: creates a single `scan` task with `type: "scan"`, updates to done on success or failed on error/abort
+- Removed per-item `UI.setStatus()` calls: "Fetching:", "Media:", "Downloading file", "Saved:", "KF: Downloading" are all replaced with TaskList operations
+- `UI.setStatus()` retained as fallback for non-task messages: "Building ZIP...", "Backoff carryover", "Preparing...", "Paused.", etc.
+- Log messages (`addLog`) unchanged - still log batch summaries, per-item results, and errors
+- Active tasks keep their last status when `Exporter.stop()` is called (not forcibly updated)
+- Exposed `Exporter`, `S`, and `Net` on `window.__cvz_Exporter`, `window.__cvz_S`, `window.__cvz_Net` for testing
+
+- Files changed:
+  - `js/script.js` - Wired TaskList to exportOneBatch, exportKnowledgeBatch, rescan; exposed internals for testing
+  - `js/tests/export-pipeline.spec.js` - 14 Playwright tests for US-003
+
+- **Learnings for future iterations:**
+
+  - Tests that exercise `Exporter.rescan()` or `Exporter.start()` must run from a `chatgpt.com` origin because `assertOnChatGPT()` checks `location.hostname`. Use Playwright `page.route()` to serve the harness from `https://chatgpt.com/test-harness`.
+  - The bookmarklet triggers auto-rescan 800ms after injection when running on chatgpt.com. Tests need to mock all API routes before navigating and wait ~1500ms for auto-rescan to complete before running test-specific operations.
+  - The initial "fetching conversation" detail is set in `TaskList.add()` (not `update()`). To capture all detail changes in tests, monkey-patch both `add()` and `update()`.
+
+---
+Final commit: 1ecea82d0f9d9e04ea887438eb00c01526a17a38

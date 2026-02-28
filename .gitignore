@@ -19,3 +19,9 @@ tmp/
 docs/ai/ralph/current
 
 .vscode/*.local.json
+
+# Playwright / Node.js (bookmarklet tests)
+node_modules/
+test-results/
+package.json
+package-lock.json

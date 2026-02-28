@@ -1,7 +1,7 @@
 # PRD: Task-Based UI Overhaul
 
 **Project:** Convoviz Bookmarklet
-**Branch:**
+**Branch:** main
 
 ## Introduction
 
@@ -20,7 +20,7 @@ This overhaul replaces the verbose stats panel and single-line status with a **s
 ## User Stories
 
 ### US-001: Rebuild panel layout with compact stats and controls
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want the bookmarklet panel to show only the numbers that matter (Exported, Pending, Dead, Projects, KF) in a compact layout, so the panel isn't cluttered with developer metrics I don't need.
 
 **Acceptance Criteria:**
@@ -41,7 +41,7 @@ This overhaul replaces the verbose stats panel and single-line status with a **s
 - [ ] Verify in browser using playwright
 
 ### US-002: Task list data model and rendering
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want to see a scrollable list of individual export operations in the panel, each with its own status icon, so I can see at a glance what's happening, what completed, and what failed.
 
 **Acceptance Criteria:**
@@ -66,7 +66,7 @@ This overhaul replaces the verbose stats panel and single-line status with a **s
 - [ ] Verify in browser using playwright
 
 ### US-003: Wire task list to export pipeline
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want each conversation and knowledge file export to appear as a live task in the task list, so I can track individual operations instead of reading a single status line.
 
 **Acceptance Criteria:**

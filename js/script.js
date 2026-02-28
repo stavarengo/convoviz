@@ -1,7 +1,7 @@
 javascript: (async () => {
   try {
     const KEY = "__cvz_export_state_v1__";
-    const VER = "cvz-bookmarklet-3.0";
+    const VER = "cvz-bookmarklet-4.0";
     const now = () => Date.now();
     const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
     const safeJsonParse = (s, fb) => {
@@ -525,6 +525,99 @@ javascript: (async () => {
         setTimeout(() => URL.revokeObjectURL(url), 10000);
       }
     };
+    const TaskList = {
+      _tasks: [],
+      _dirty: false,
+      _userScrolled: false,
+      add: function(task) {
+        this._tasks.push({
+          id: task.id,
+          type: task.type || "conversation",
+          label: task.label || "",
+          projectName: task.projectName || null,
+          status: task.status || "queued",
+          detail: task.detail || null,
+          error: task.error || null,
+          startedAt: (task.status === "active") ? now() : (task.status === "queued" ? null : now()),
+          completedAt: (task.status === "done" || task.status === "failed") ? now() : null
+        });
+        this._dirty = true;
+      },
+      update: function(id, changes) {
+        for (var i = 0; i < this._tasks.length; i++) {
+          if (this._tasks[i].id === id) {
+            var t = this._tasks[i];
+            for (var k in changes) {
+              if (changes.hasOwnProperty(k)) {
+                t[k] = changes[k];
+              }
+            }
+            if ((changes.status === "done" || changes.status === "failed") && !t.completedAt) {
+              t.completedAt = now();
+            }
+            if (changes.status === "active" && !t.startedAt) {
+              t.startedAt = now();
+            }
+            this._dirty = true;
+            return;
+          }
+        }
+      },
+      getVisible: function() {
+        var failed = [];
+        var active = [];
+        var done = [];
+        var queued = [];
+        for (var i = 0; i < this._tasks.length; i++) {
+          var t = this._tasks[i];
+          if (t.status === "failed") failed.push(t);
+          else if (t.status === "active") active.push(t);
+          else if (t.status === "done") done.push(t);
+          else if (t.status === "queued") queued.push(t);
+        }
+        // Sliding window: all failed + all active + last ~30 done + next ~10 queued
+        var visibleDone = done.length > 30 ? done.slice(done.length - 30) : done;
+        var visibleQueued = queued.length > 10 ? queued.slice(0, 10) : queued;
+        return [].concat(failed, visibleDone, active, visibleQueued);
+      },
+      render: function() {
+        if (!this._dirty) return;
+        this._dirty = false;
+        var el = document.getElementById("cvz-tasks");
+        if (!el) return;
+        var wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 10;
+        var visible = this.getVisible();
+        var html = "";
+        for (var i = 0; i < visible.length; i++) {
+          var t = visible[i];
+          var cls = "cvz-task-" + t.status;
+          var prefix = "";
+          var style = "";
+          if (t.status === "queued") {
+            prefix = "\u00b7 ";
+            style = "opacity:0.5;";
+          } else if (t.status === "active") {
+            prefix = '<span class="cvz-spin" style="display:inline-block;animation:cvz-spin 1s linear infinite;">\u27f3</span> ';
+            style = "color:#10a37f;";
+          } else if (t.status === "done") {
+            prefix = "\u2713 ";
+            style = "opacity:0.6;";
+          } else if (t.status === "failed") {
+            prefix = "\u2717 ";
+            style = "color:#ef4444;";
+          }
+          var projPrefix = t.projectName ? "<span style=\"opacity:0.7;\">[" + t.projectName + "]</span> " : "";
+          var errorSuffix = (t.status === "failed" && t.error) ? " <span style=\"opacity:0.8;\">(" + t.error + ")</span>" : "";
+          html += '<div class="' + cls + '" style="' + style + 'padding:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + prefix + projPrefix + t.label + errorSuffix + '</div>';
+          if (t.status === "active" && t.detail) {
+            html += '<div class="cvz-task-detail" style="padding-left:16px;opacity:0.7;padding:1px 0;">\u21b3 ' + t.detail + '</div>';
+          }
+        }
+        el.innerHTML = html;
+        if (wasAtBottom) el.scrollTop = el.scrollHeight;
+      }
+    };
+    window.__cvz_TaskList = TaskList;
     const UIImpl = {
       container: null,
       inject() {
@@ -537,9 +630,15 @@ javascript: (async () => {
         const d = document.createElement("div");
         d.id = "cvz-resume-ui";
         d.style = "position:fixed;top:20px;right:20px;width:380px;max-width:calc(100vw - 40px);background:rgba(32,33,35,0.95);color:#ececf1;border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;z-index:2147483647;font-family:-apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 12px 24px rgba(0,0,0,0.35);backdrop-filter:blur(10px);";
-        d.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' + '<div style="font-weight:700;font-size:14px;">Convoviz Direct Export</div>' + '<button id="cvz-x" style="border:0;background:transparent;color:#ececf1;font-size:18px;line-height:18px;cursor:pointer;">×</button>' + '</div>' + '<div style="opacity:0.75;font-size:11px;margin-top:2px;">' + VER + (_useLocalStorage ? ' · \u26A0 localStorage fallback \u2014 large exports may lose state' : ' · state in IndexedDB') + '</div>' + '<div style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">' + '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;">' + '<div><b>Exported:</b> <span id="cvz-exported">0</span></div>' + '<div><b>Pending:</b> <span id="cvz-pending">0</span></div>' + '<div><b>Total:</b> <span id="cvz-total">?</span></div>' + '<div><b>Dead:</b> <span id="cvz-dead">0</span></div>' + '</div>' + '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin-top:4px;">' + '<div><b>Projects:</b> <span id="cvz-projects">0</span></div>' + '<div><b>KF:</b> <span id="cvz-kf-count">0/0</span></div>' + '</div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.85;">' + 'Avg/chat: <span id="cvz-avgChat">-</span> · Avg/batch: <span id="cvz-avgBatch">-</span> · ETA: <span id="cvz-eta">-</span>' + '</div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.85;">Last stop: <span id="cvz-lastStop">-</span></div>' + '<div style="margin-top:4px;font-size:11px;opacity:0.85;">Last error: <span id="cvz-lastErr">-</span></div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.9;">Δ since last scan: <span id="cvz-delta">-</span></div>' + '<div style="margin-top:4px;font-size:11px;opacity:0.9;">Δ pending: <span id="cvz-pdelta">-</span></div>' + '</div>' + '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + '<label style="font-size:11px;opacity:0.9;">Batch</label>' + '<input id="cvz-batch" type="number" min="1" max="500" style="width:90px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;" />' + '<button id="cvz-rescan" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;">Rescan</button>' + '</div>' + '<div style="margin-top:10px;display:flex;gap:8px;">' + '<button id="cvz-start" style="flex:1;padding:8px 10px;border-radius:10px;border:1px solid rgba(16,163,127,0.6);background:rgba(16,163,127,0.15);color:#ececf1;cursor:pointer;font-weight:600;">Start</button>' + '<button id="cvz-stop" style="flex:1;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-weight:600;">Stop</button>' + '</div>' + '<div id="cvz-status" style="margin-top:10px;font-size:12px;">Idle</div>' + '<div style="height:8px;margin-top:6px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;">' + '<div id="cvz-bar" style="height:100%;width:0%;background:#10a37f;"></div>' + '</div>' + '<div id="cvz-kf-row" style="display:none;margin-top:4px;">' + '<div style="display:flex;align-items:center;gap:6px;">' + '<span id="cvz-kf-status" style="font-size:11px;opacity:0.85;white-space:nowrap;"></span>' + '</div>' + '<div style="height:6px;margin-top:3px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;">' + '<div id="cvz-kf-bar" style="height:100%;width:0%;background:#8b5cf6;"></div>' + '</div>' + '</div>' + '<textarea id="cvz-log" readonly style="margin-top:10px;height:160px;width:100%;box-sizing:border-box;resize:vertical;font-size:11px;white-space:pre-wrap;background:rgba(0,0,0,0.25);color:#ececf1;border:1px solid rgba(255,255,255,0.08);padding:8px;border-radius:10px;font-family:inherit;outline:none;"></textarea>' + '<div style="margin-top:10px;display:flex;justify-content:space-between;gap:8px;">' + '<button id="cvz-reset" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Reset</button>' + '<button id="cvz-dlstate" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Export state</button>' + '</div>';
+        d.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' + '<div style="font-weight:700;font-size:14px;">Convoviz Direct Export</div>' + '<button id="cvz-x" style="border:0;background:transparent;color:#ececf1;font-size:18px;line-height:18px;cursor:pointer;">\u00d7</button>' + '</div>' + '<div style="opacity:0.75;font-size:11px;margin-top:2px;">' + VER + (_useLocalStorage ? ' \u00b7 \u26A0 localStorage fallback \u2014 large exports may lose state' : ' \u00b7 state in IndexedDB') + '</div>' + '<div data-testid="cvz-stats" style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">' + '<div style="display:flex;gap:10px;align-items:center;font-size:12px;">' + '<div><b>Exported:</b> <span id="cvz-exported">0</span></div>' + '<div>\u00b7</div>' + '<div><b>Pending:</b> <span id="cvz-pending">0</span></div>' + '<div>\u00b7</div>' + '<div><b>Dead:</b> <span id="cvz-dead">0</span></div>' + '<div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;min-width:40px;">' + '<div id="cvz-bar" style="height:100%;width:0%;background:#10a37f;"></div>' + '</div>' + '</div>' + '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin-top:4px;">' + '<div><b>Projects:</b> <span id="cvz-projects">0</span></div>' + '<div>\u00b7</div>' + '<div><b>KF:</b> <span id="cvz-kf-count">0/0</span></div>' + '</div>' + '</div>' + '<div data-testid="cvz-controls" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + '<label style="font-size:11px;opacity:0.9;">Batch</label>' + '<input id="cvz-batch" type="number" min="1" max="500" style="width:60px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;" />' + '<button id="cvz-rescan" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;">Rescan</button>' + '<button id="cvz-start" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(16,163,127,0.6);background:rgba(16,163,127,0.15);color:#ececf1;cursor:pointer;font-weight:600;">Start</button>' + '<button id="cvz-stop" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-weight:600;">Stop</button>' + '</div>' + '<div id="cvz-status" style="margin-top:6px;font-size:11px;opacity:0.85;min-height:14px;"></div>' + '<div id="cvz-tasks" style="margin-top:6px;height:180px;overflow-y:auto;border-radius:10px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);padding:6px 8px;font-size:11px;"></div>' + '<textarea id="cvz-log" readonly style="margin-top:10px;height:80px;width:100%;box-sizing:border-box;resize:vertical;font-size:11px;white-space:pre-wrap;background:rgba(0,0,0,0.25);color:#ececf1;border:1px solid rgba(255,255,255,0.08);padding:8px;border-radius:10px;font-family:inherit;outline:none;"></textarea>' + '<div style="margin-top:10px;display:flex;justify-content:space-between;gap:8px;">' + '<button id="cvz-reset" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Reset</button>' + '<button id="cvz-dlstate" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Export state</button>' + '</div>';
         document.body.appendChild(d);
         this.container = d;
+        if (!document.getElementById("cvz-spin-style")) {
+          var styleEl = document.createElement("style");
+          styleEl.id = "cvz-spin-style";
+          styleEl.textContent = "@keyframes cvz-spin { to { transform: rotate(360deg); } }";
+          document.head.appendChild(styleEl);
+        }
         d.querySelector("#cvz-x").onclick = () => {
           d.style.display = "none";
         };
@@ -596,33 +695,9 @@ javascript: (async () => {
         const pending = (S.progress.pending || []).length;
         const dead = (S.progress.dead || []).length;
         const scanning = !!(_exporter && _exporter.scanPromise);
-        const total = S.scan.total ? S.scan.total : (exported + pending) || "?";
-        const totalLabel = scanning ? (exported + pending) + "…" : String(total);
-        const batches = S.stats.batches || 0;
-        const batchMs = S.stats.batchMs || 0;
-        const chats = S.stats.chats || 0;
-        const avgChat = chats ? batchMs / chats : 0;
-        const avgBatch = batches ? batchMs / batches : 0;
-        const eta = pending && avgChat ? pending * avgChat : 0;
         this.container.querySelector("#cvz-exported").textContent = String(exported);
-        this.container.querySelector("#cvz-pending").textContent = scanning ? pending + "…" : String(pending);
-        this.container.querySelector("#cvz-total").textContent = totalLabel;
+        this.container.querySelector("#cvz-pending").textContent = scanning ? pending + "\u2026" : String(pending);
         this.container.querySelector("#cvz-dead").textContent = String(dead);
-        this.container.querySelector("#cvz-avgChat").textContent = avgChat ? fmtMs(avgChat) : "-";
-        this.container.querySelector("#cvz-avgBatch").textContent = avgBatch ? fmtMs(avgBatch) : "-";
-        this.container.querySelector("#cvz-eta").textContent = eta ? fmtMs(eta) : "-";
-        this.container.querySelector("#cvz-lastStop").textContent = S.run.stoppedAt ? fmtTs(S.run.stoppedAt) : "-";
-        this.container.querySelector("#cvz-lastErr").textContent = S.run.lastError ? String(S.run.lastError).slice(0, 80) : "-";
-        const c = S.changes || {};
-        if (scanning) {
-          this.container.querySelector("#cvz-delta").textContent = "scanning…";
-          this.container.querySelector("#cvz-pdelta").textContent = "scanning…";
-        } else {
-          const delta = "+" + (c.newChats || 0) + " new, -" + (c.removedChats || 0) + " removed, ~" + (c.updatedChats || 0) + " updated";
-          this.container.querySelector("#cvz-delta").textContent = delta;
-          const pdelta = ((c.pendingDelta || 0) >= 0 ? "+" : "") + (c.pendingDelta || 0) + " (new pending: " + (c.newPending || 0) + ")";
-          this.container.querySelector("#cvz-pdelta").textContent = pdelta;
-        }
         const batchEl = this.container.querySelector("#cvz-batch");
         if (batchEl) batchEl.disabled = !!S.run.isRunning;
         var projectCount = (S.projects || []).length || S.scan.totalProjects || 0;
@@ -631,24 +706,12 @@ javascript: (async () => {
         var kfPend = (S.progress.kfPending || []).length;
         var kfTotal = kfExp + kfPend + (S.progress.kfDead || []).length;
         this.container.querySelector("#cvz-kf-count").textContent = kfExp + "/" + kfTotal;
-        var kfRowEl = this.container.querySelector("#cvz-kf-row");
-        if (kfRowEl) {
-          var kfActive = S.run.isRunning && !pending && kfPend > 0;
-          kfRowEl.style.display = kfActive ? "block" : "none";
-          var kfBarEl = this.container.querySelector("#cvz-kf-bar");
-          if (kfBarEl) {
-            var kfDenom = kfExp + kfPend;
-            var kfPct = kfDenom ? (kfExp / kfDenom) * 100 : 0;
-            kfBarEl.style.width = clamp(kfPct, 0, 100).toFixed(1) + "%";
-          }
-          var kfStatusEl = this.container.querySelector("#cvz-kf-status");
-          if (kfStatusEl) kfStatusEl.textContent = "Knowledge files: " + kfExp + "/" + (kfExp + kfPend);
-        }
         this.renderLogs();
         const done = exported;
         const tot = S.scan.total ? S.scan.total : (exported + pending);
         const pct = tot ? (done / tot) * 100 : 0;
         this.setBar(pct);
+        TaskList.render();
       },
       _tickId: 0,
       ensureTick() {
@@ -668,6 +731,7 @@ javascript: (async () => {
       }
     };
     UI = UIImpl;
+    window.__cvz_UI = UIImpl;
     UI.inject();
     UI.renderAll();
     if (S.run.isRunning) {
@@ -872,6 +936,7 @@ javascript: (async () => {
         this.scanPromise = (async () => {
           try {
             assertOnChatGPT();
+            TaskList.add({id: "scan", type: "scan", label: "Scanning conversations and projects\u2026", status: "active"});
             S.run.lastPhase = "scan";
             S.scan.total = 0;
             S.scan.totalProjects = 0;
@@ -958,16 +1023,19 @@ javascript: (async () => {
               snapshot: allItems.map(x => [x.id, x.update_time || 0])
             };
             saveDebounce(true);
+            TaskList.update("scan", {status: "done", detail: null});
             if (UI) UI.setStatus("Rescan done.");
             addLog("Rescan done. Total " + allItems.length + " (" + items.length + " regular + " + projectConvItems.length + " project), pending " + S.progress.pending.length + ".");
             if (UI) UI.renderAll();
           } catch (e) {
             if (e && e.name === "AbortError") {
+              TaskList.update("scan", {status: "failed", error: "Stopped"});
               if (UI) UI.setStatus("Scan stopped.");
               addLog("Scan stopped.");
             } else {
               S.run.lastError = String(e && e.message || e);
               saveDebounce(true);
+              TaskList.update("scan", {status: "failed", error: String(e && e.message || e)});
               if (UI) UI.setStatus("Rescan error: " + (e && e.message || e));
               addLog("Rescan error: " + (e && e.message || e));
               console.error(e);
@@ -1091,7 +1159,8 @@ javascript: (async () => {
             const item = queue.shift();
             const projName = item.gizmo_id ? ((S.projects || []).find(function(p) { return p.gizmoId === item.gizmo_id; }) || {}).name : null;
             const title = projName ? "[" + projName + "] " + (item.title || item.id) : (item.title || item.id);
-            if (UI) UI.setStatus("Fetching: " + title);
+            const taskId = "conv-" + item.id;
+            TaskList.add({id: taskId, type: "conversation", label: item.title || item.id, projectName: projName || null, status: "active", detail: "fetching conversation"});
             const t0 = now();
             try {
               const detail = await Net.fetchJson("/backend-api/conversation/" + item.id, {
@@ -1099,12 +1168,12 @@ javascript: (async () => {
                 auth: true
               });
               const refs = extractFileRefs(detail);
-              if (refs.length && UI) UI.setStatus("Media: " + title + " (" + refs.length + " files)");
+              if (refs.length) TaskList.update(taskId, {detail: "downloading 1/" + refs.length + " files"});
               for (let i = 0; i < refs.length; i++) {
                 if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
                 const f = refs[i];
+                TaskList.update(taskId, {detail: "downloading " + (i + 1) + "/" + refs.length + " files"});
                 try {
-                  if (UI) UI.setStatus("Downloading file " + (i + 1) + "/" + refs.length + " for " + title);
                   const meta = await Net.fetchJson("/backend-api/files/download/" + f.id, {
                     signal,
                     auth: true
@@ -1136,12 +1205,13 @@ javascript: (async () => {
                 S.progress.exported.push(item.id);
                 exportedSet.add(item.id);
               }
-              if (UI) UI.setStatus("Saved: " + title);
+              TaskList.update(taskId, {status: "done", detail: null});
               addLog("✓ " + title + " (" + fmtMs(now() - t0) + ", files " + refs.length + ")");
             } catch (e) {
               if (e && e.name === "AbortError") throw e;
               const msg = (e && e.message) || String(e);
               failInfo[item.id] = msg;
+              TaskList.update(taskId, {status: "failed", error: msg});
               addLog("✗ " + title + ": " + msg);
             }
             if (UI) UI.renderAll();
@@ -1253,7 +1323,8 @@ javascript: (async () => {
           while (queue.length && !(signal && signal.aborted)) {
             const item = queue.shift();
             const label = "[" + item.projectName + "] " + item.fileName;
-            if (UI) UI.setStatus("KF: Downloading " + label);
+            const taskId = "kf-" + item.fileId;
+            TaskList.add({id: taskId, type: "knowledge", label: item.fileName, projectName: item.projectName, status: "active", detail: "downloading"});
             const t0 = now();
             try {
               const meta = await Net.fetchJson("/backend-api/files/download/" + encodeURIComponent(item.fileId) + "?gizmo_id=" + encodeURIComponent(item.projectId) + "&inline=false", {
@@ -1267,6 +1338,7 @@ javascript: (async () => {
                 }]).slice(-500);
                 S.progress.kfFailCounts[item.fileId] = 3;
                 failInfo[item.fileId] = "file_not_found";
+                TaskList.update(taskId, {status: "failed", error: "file_not_found"});
                 addLog("\u2717 KF dead-lettered (not found): " + label);
                 if (UI) UI.renderAll();
                 if (pause) await sleep(pause, signal).catch(function() {});
@@ -1284,15 +1356,18 @@ javascript: (async () => {
                 successes.push(item);
                 successIds.add(item.fileId);
                 projectsInBatch.add(item.projectId);
+                TaskList.update(taskId, {status: "done", detail: null});
                 addLog("\u2713 KF " + label + " (" + fmtMs(now() - t0) + ")");
               } else {
                 failInfo[item.fileId] = "no download_url in response";
+                TaskList.update(taskId, {status: "failed", error: "no download_url in response"});
                 addLog("\u2717 KF no download_url: " + label);
               }
             } catch (e) {
               if (e && e.name === "AbortError") throw e;
               const msg = (e && e.message) || String(e);
               failInfo[item.fileId] = msg;
+              TaskList.update(taskId, {status: "failed", error: msg});
               addLog("\u2717 KF " + label + ": " + msg);
             }
             if (UI) UI.renderAll();
@@ -1392,6 +1467,9 @@ javascript: (async () => {
       }
     };
     _exporter = Exporter;
+    window.__cvz_Exporter = Exporter;
+    window.__cvz_S = S;
+    window.__cvz_Net = Net;
     if (S.settings.autoRescan !== false && !S.run.isRunning && !Exporter.scanPromise) {
       setTimeout(() => {
         if (!S.run.isRunning) Exporter.rescan(false);
