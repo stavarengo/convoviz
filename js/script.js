@@ -373,6 +373,7 @@ javascript: (async () => {
       };
     })();
     let UI = null;
+    let _exporter = null;
     const addLog = (msg) => {
       const stamp = new Date().toLocaleTimeString();
       const line = "[" + stamp + "] " + msg;
@@ -519,7 +520,7 @@ javascript: (async () => {
         const d = document.createElement("div");
         d.id = "cvz-resume-ui";
         d.style = "position:fixed;top:20px;right:20px;width:380px;max-width:calc(100vw - 40px);background:rgba(32,33,35,0.95);color:#ececf1;border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;z-index:2147483647;font-family:-apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 12px 24px rgba(0,0,0,0.35);backdrop-filter:blur(10px);";
-        d.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' + '<div style="font-weight:700;font-size:14px;">Convoviz Direct Export</div>' + '<button id="cvz-x" style="border:0;background:transparent;color:#ececf1;font-size:18px;line-height:18px;cursor:pointer;">×</button>' + '</div>' + '<div style="opacity:0.75;font-size:11px;margin-top:2px;">' + VER + (_useLocalStorage ? ' · \u26A0 localStorage fallback \u2014 large exports may lose state' : ' · state in IndexedDB') + '</div>' + '<div style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">' + '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;">' + '<div><b>Exported:</b> <span id="cvz-exported">0</span></div>' + '<div><b>Pending:</b> <span id="cvz-pending">0</span></div>' + '<div><b>Total:</b> <span id="cvz-total">?</span></div>' + '<div><b>Dead:</b> <span id="cvz-dead">0</span></div>' + '</div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.85;">' + 'Avg/chat: <span id="cvz-avgChat">-</span> · Avg/batch: <span id="cvz-avgBatch">-</span> · ETA: <span id="cvz-eta">-</span>' + '</div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.85;">Last stop: <span id="cvz-lastStop">-</span></div>' + '<div style="margin-top:4px;font-size:11px;opacity:0.85;">Last error: <span id="cvz-lastErr">-</span></div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.9;">Δ since last scan: <span id="cvz-delta">-</span></div>' + '<div style="margin-top:4px;font-size:11px;opacity:0.9;">Δ pending: <span id="cvz-pdelta">-</span></div>' + '</div>' + '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + '<label style="font-size:11px;opacity:0.9;">Batch</label>' + '<input id="cvz-batch" type="number" min="1" max="500" style="width:90px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;" />' + '<button id="cvz-rescan" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;">Rescan</button>' + '</div>' + '<div style="margin-top:10px;display:flex;gap:8px;">' + '<button id="cvz-start" style="flex:1;padding:8px 10px;border-radius:10px;border:1px solid rgba(16,163,127,0.6);background:rgba(16,163,127,0.15);color:#ececf1;cursor:pointer;font-weight:600;">Start</button>' + '<button id="cvz-stop" style="flex:1;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-weight:600;">Stop</button>' + '</div>' + '<div id="cvz-status" style="margin-top:10px;font-size:12px;">Idle</div>' + '<div style="height:8px;margin-top:6px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;">' + '<div id="cvz-bar" style="height:100%;width:0%;background:#10a37f;"></div>' + '</div>' + '<div id="cvz-log" style="margin-top:10px;max-height:160px;overflow:auto;font-size:11px;white-space:pre-wrap;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);padding:8px;border-radius:10px;"></div>' + '<div style="margin-top:10px;display:flex;justify-content:space-between;gap:8px;">' + '<button id="cvz-reset" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Reset</button>' + '<button id="cvz-dlstate" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Export state</button>' + '</div>';
+        d.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' + '<div style="font-weight:700;font-size:14px;">Convoviz Direct Export</div>' + '<button id="cvz-x" style="border:0;background:transparent;color:#ececf1;font-size:18px;line-height:18px;cursor:pointer;">×</button>' + '</div>' + '<div style="opacity:0.75;font-size:11px;margin-top:2px;">' + VER + (_useLocalStorage ? ' · \u26A0 localStorage fallback \u2014 large exports may lose state' : ' · state in IndexedDB') + '</div>' + '<div style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">' + '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;">' + '<div><b>Exported:</b> <span id="cvz-exported">0</span></div>' + '<div><b>Pending:</b> <span id="cvz-pending">0</span></div>' + '<div><b>Total:</b> <span id="cvz-total">?</span></div>' + '<div><b>Dead:</b> <span id="cvz-dead">0</span></div>' + '</div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.85;">' + 'Avg/chat: <span id="cvz-avgChat">-</span> · Avg/batch: <span id="cvz-avgBatch">-</span> · ETA: <span id="cvz-eta">-</span>' + '</div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.85;">Last stop: <span id="cvz-lastStop">-</span></div>' + '<div style="margin-top:4px;font-size:11px;opacity:0.85;">Last error: <span id="cvz-lastErr">-</span></div>' + '<div style="margin-top:6px;font-size:11px;opacity:0.9;">Δ since last scan: <span id="cvz-delta">-</span></div>' + '<div style="margin-top:4px;font-size:11px;opacity:0.9;">Δ pending: <span id="cvz-pdelta">-</span></div>' + '</div>' + '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + '<label style="font-size:11px;opacity:0.9;">Batch</label>' + '<input id="cvz-batch" type="number" min="1" max="500" style="width:90px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;" />' + '<button id="cvz-rescan" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;">Rescan</button>' + '</div>' + '<div style="margin-top:10px;display:flex;gap:8px;">' + '<button id="cvz-start" style="flex:1;padding:8px 10px;border-radius:10px;border:1px solid rgba(16,163,127,0.6);background:rgba(16,163,127,0.15);color:#ececf1;cursor:pointer;font-weight:600;">Start</button>' + '<button id="cvz-stop" style="flex:1;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-weight:600;">Stop</button>' + '</div>' + '<div id="cvz-status" style="margin-top:10px;font-size:12px;">Idle</div>' + '<div style="height:8px;margin-top:6px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;">' + '<div id="cvz-bar" style="height:100%;width:0%;background:#10a37f;"></div>' + '</div>' + '<textarea id="cvz-log" readonly style="margin-top:10px;height:160px;width:100%;box-sizing:border-box;resize:vertical;font-size:11px;white-space:pre-wrap;background:rgba(0,0,0,0.25);color:#ececf1;border:1px solid rgba(255,255,255,0.08);padding:8px;border-radius:10px;font-family:inherit;outline:none;"></textarea>' + '<div style="margin-top:10px;display:flex;justify-content:space-between;gap:8px;">' + '<button id="cvz-reset" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Reset</button>' + '<button id="cvz-dlstate" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Export state</button>' + '</div>';
         document.body.appendChild(d);
         this.container = d;
         d.querySelector("#cvz-x").onclick = () => {
@@ -569,7 +570,7 @@ javascript: (async () => {
       renderLogs() {
         const el = this.container && this.container.querySelector("#cvz-log");
         if (!el) return;
-        el.textContent = (S.logs || []).slice(-200).join("\n");
+        el.value = (S.logs || []).slice(-200).join("\n");
         el.scrollTop = el.scrollHeight;
       },
       renderAll() {
@@ -577,7 +578,9 @@ javascript: (async () => {
         const exported = (S.progress.exported || []).length;
         const pending = (S.progress.pending || []).length;
         const dead = (S.progress.dead || []).length;
-        const total = S.scan.total || (exported + pending) || "?";
+        const scanning = !!(_exporter && _exporter.scanPromise);
+        const total = S.scan.total ? S.scan.total : (exported + pending) || "?";
+        const totalLabel = scanning ? (exported + pending) + "…" : String(total);
         const batches = S.stats.batches || 0;
         const batchMs = S.stats.batchMs || 0;
         const chats = S.stats.chats || 0;
@@ -585,8 +588,8 @@ javascript: (async () => {
         const avgBatch = batches ? batchMs / batches : 0;
         const eta = pending && avgChat ? pending * avgChat : 0;
         this.container.querySelector("#cvz-exported").textContent = String(exported);
-        this.container.querySelector("#cvz-pending").textContent = String(pending);
-        this.container.querySelector("#cvz-total").textContent = String(total);
+        this.container.querySelector("#cvz-pending").textContent = scanning ? pending + "…" : String(pending);
+        this.container.querySelector("#cvz-total").textContent = totalLabel;
         this.container.querySelector("#cvz-dead").textContent = String(dead);
         this.container.querySelector("#cvz-avgChat").textContent = avgChat ? fmtMs(avgChat) : "-";
         this.container.querySelector("#cvz-avgBatch").textContent = avgBatch ? fmtMs(avgBatch) : "-";
@@ -594,17 +597,38 @@ javascript: (async () => {
         this.container.querySelector("#cvz-lastStop").textContent = S.run.stoppedAt ? fmtTs(S.run.stoppedAt) : "-";
         this.container.querySelector("#cvz-lastErr").textContent = S.run.lastError ? String(S.run.lastError).slice(0, 80) : "-";
         const c = S.changes || {};
-        const delta = "+" + (c.newChats || 0) + " new, -" + (c.removedChats || 0) + " removed, ~" + (c.updatedChats || 0) + " updated";
-        this.container.querySelector("#cvz-delta").textContent = delta;
-        const pdelta = ((c.pendingDelta || 0) >= 0 ? "+" : "") + (c.pendingDelta || 0) + " (new pending: " + (c.newPending || 0) + ")";
-        this.container.querySelector("#cvz-pdelta").textContent = pdelta;
+        if (scanning) {
+          this.container.querySelector("#cvz-delta").textContent = "scanning…";
+          this.container.querySelector("#cvz-pdelta").textContent = "scanning…";
+        } else {
+          const delta = "+" + (c.newChats || 0) + " new, -" + (c.removedChats || 0) + " removed, ~" + (c.updatedChats || 0) + " updated";
+          this.container.querySelector("#cvz-delta").textContent = delta;
+          const pdelta = ((c.pendingDelta || 0) >= 0 ? "+" : "") + (c.pendingDelta || 0) + " (new pending: " + (c.newPending || 0) + ")";
+          this.container.querySelector("#cvz-pdelta").textContent = pdelta;
+        }
         const batchEl = this.container.querySelector("#cvz-batch");
         if (batchEl) batchEl.disabled = !!S.run.isRunning;
         this.renderLogs();
         const done = exported;
-        const tot = (typeof total === "number") ? total : (exported + pending);
+        const tot = S.scan.total ? S.scan.total : (exported + pending);
         const pct = tot ? (done / tot) * 100 : 0;
         this.setBar(pct);
+      },
+      _tickId: 0,
+      ensureTick() {
+        if (this._tickId) return;
+        this._tickId = setInterval(() => {
+          if (!document.getElementById("cvz-resume-ui")) {
+            clearInterval(this._tickId);
+            this._tickId = 0;
+            return;
+          }
+          this.renderAll();
+          if (!S.run.isRunning && !(_exporter && _exporter.scanPromise)) {
+            clearInterval(this._tickId);
+            this._tickId = 0;
+          }
+        }, 1000);
       }
     };
     UI = UIImpl;
@@ -655,9 +679,11 @@ javascript: (async () => {
       }
       return out;
     };
-    const scanConversations = async (signal) => {
+    const scanConversations = async (signal, onPage) => {
       await Net.getToken(signal);
-      const pageSize = 50;
+      const rawBatch = clamp(parseInt(S.settings.batch, 10) || 50, 1, 500);
+      const pageSize = Math.min(rawBatch, 100);
+      if (rawBatch > 100 && UI) UI.setStatus("Scan page size capped at 100 (API limit)");
       let offset = 0;
       const items = [];
       while (true) {
@@ -668,13 +694,17 @@ javascript: (async () => {
         });
         const got = (data && data.items) || [];
         if (!got.length) break;
+        const pageItems = [];
         for (const it of got) {
-          items.push({
+          const item = {
             id: it.id,
             title: it.title || "",
             update_time: it.update_time || it.updated_time || 0
-          });
+          };
+          items.push(item);
+          pageItems.push(item);
         }
+        if (onPage) onPage(pageItems);
         offset += got.length;
         if (got.length < pageSize) break;
         if (data.total && offset >= data.total) break;
@@ -717,6 +747,7 @@ javascript: (async () => {
     };
     const Exporter = {
       abort: null,
+      _scanAbort: null,
       stopRequested: false,
       scanPromise: null,
       async rescan(force) {
@@ -726,34 +757,58 @@ javascript: (async () => {
         }
         if (this.scanPromise) return this.scanPromise;
         const ac = new AbortController();
+        this._scanAbort = ac;
+        if (UI && UI.ensureTick) UI.ensureTick();
         this.scanPromise = (async () => {
           try {
             assertOnChatGPT();
             S.run.lastPhase = "scan";
+            S.scan.total = 0;
+            S.changes = { at: 0, newChats: 0, removedChats: 0, updatedChats: 0, newPending: 0, pendingDelta: 0 };
             saveDebounce(true);
+            if (UI) UI.renderAll();
             addLog("Rescan started…");
-            const items = await scanConversations(ac.signal);
             const exportedSet = new Set(S.progress.exported || []);
             const deadSet = new Set((S.progress.dead || []).map(x => x.id));
-            const freshPending = items.filter(x => !exportedSet.has(x.id) && !deadSet.has(x.id));
-            S.changes = computeChanges(S.scan.snapshot, items, freshPending);
+            const pendingSet = new Set((S.progress.pending || []).map(x => x.id));
+            const onPage = (pageItems) => {
+              let added = 0;
+              for (const it of pageItems) {
+                if (!exportedSet.has(it.id) && !deadSet.has(it.id) && !pendingSet.has(it.id)) {
+                  S.progress.pending.push(it);
+                  pendingSet.add(it.id);
+                  added++;
+                }
+              }
+              if (added) {
+                saveDebounce(false);
+                if (UI) UI.renderAll();
+              }
+            };
+            const items = await scanConversations(ac.signal, onPage);
+            S.changes = computeChanges(S.scan.snapshot, items, S.progress.pending);
             S.scan = {
               at: now(),
               total: items.length,
               snapshot: items.map(x => [x.id, x.update_time || 0])
             };
-            S.progress.pending = freshPending;
             saveDebounce(true);
             if (UI) UI.setStatus("Rescan done.");
-            addLog("Rescan done. Total " + items.length + ", pending " + freshPending.length + ".");
+            addLog("Rescan done. Total " + items.length + ", pending " + S.progress.pending.length + ".");
             if (UI) UI.renderAll();
           } catch (e) {
-            S.run.lastError = String(e && e.message || e);
-            saveDebounce(true);
-            if (UI) UI.setStatus("Rescan error: " + (e && e.message || e));
-            addLog("Rescan error: " + (e && e.message || e));
-            console.error(e);
+            if (e && e.name === "AbortError") {
+              if (UI) UI.setStatus("Scan stopped.");
+              addLog("Scan stopped.");
+            } else {
+              S.run.lastError = String(e && e.message || e);
+              saveDebounce(true);
+              if (UI) UI.setStatus("Rescan error: " + (e && e.message || e));
+              addLog("Rescan error: " + (e && e.message || e));
+              console.error(e);
+            }
           } finally {
+            this._scanAbort = null;
             this.scanPromise = null;
             S.run.lastPhase = "idle";
             saveDebounce(false);
@@ -771,6 +826,7 @@ javascript: (async () => {
           this.stopRequested = false;
           const ac = new AbortController();
           this.abort = ac;
+          if (UI && UI.ensureTick) UI.ensureTick();
           S.run.lastError = "";
           S.run.startedAt = now();
           S.run.lastPhase = "prepare";
@@ -779,16 +835,10 @@ javascript: (async () => {
           addLog("Start.");
           if (UI) UI.setStatus("Preparing…");
           await Net.getToken(ac.signal);
-          if (this.scanPromise) {
-            if (UI) UI.setStatus("Waiting for scan…");
-            await this.scanPromise;
-          }
           const scanAge = S.scan.at ? (now() - S.scan.at) : Infinity;
-          if (S.settings.autoRescan !== false && scanAge > 6 * 60 * 60 * 1000) {
-            await this.rescan(true);
-          }
-          if (!Array.isArray(S.progress.pending) || !S.progress.pending.length) {
-            await this.rescan(true);
+          const needsScan = !Array.isArray(S.progress.pending) || !S.progress.pending.length || (S.settings.autoRescan !== false && scanAge > 6 * 60 * 60 * 1000);
+          if (needsScan && !this.scanPromise) {
+            this.rescan(true);
           }
           if (S.run.backoffUntil && S.run.backoffUntil > now()) {
             const wait = S.run.backoffUntil - now();
@@ -801,7 +851,13 @@ javascript: (async () => {
           saveDebounce(true);
           if (UI) UI.renderAll();
           if (UI) UI.setStatus("Running…");
-          while (S.run.isRunning && S.progress.pending.length) {
+          while (S.run.isRunning) {
+            if (!S.progress.pending.length && this.scanPromise) {
+              if (UI) UI.setStatus("Waiting for scan to find conversations…");
+              await sleep(500, ac.signal);
+              continue;
+            }
+            if (!S.progress.pending.length || this.stopRequested) break;
             await this.exportOneBatch(ac.signal);
             if (this.stopRequested) break;
           }
@@ -827,7 +883,7 @@ javascript: (async () => {
         }
       },
       stop() {
-        if (!this.abort && !S.run.isRunning) {
+        if (!this.abort && !this._scanAbort && !S.run.isRunning) {
           addLog("Not running.");
           return;
         }
@@ -838,6 +894,7 @@ javascript: (async () => {
         addLog("Stop requested…");
         if (UI) UI.setStatus("Stopping…");
         if (this.abort) this.abort.abort();
+        if (this._scanAbort) this._scanAbort.abort();
       },
       async exportOneBatch(signal) {
         const batchSize = clamp(parseInt(S.settings.batch, 10) || 50, 1, 500);
@@ -848,6 +905,7 @@ javascript: (async () => {
         const zip = new ZipLite();
         const successes = [];
         const successIds = new Set();
+        const exportedSet = new Set(S.progress.exported || []);
         const failInfo = {};
         let filesSaved = 0,
           filesFailed = 0;
@@ -877,10 +935,11 @@ javascript: (async () => {
                     auth: true
                   });
                   if (meta && meta.download_url) {
+                    const isSameOrigin = meta.download_url.startsWith("/") || meta.download_url.startsWith(location.origin);
                     const blob = await Net.fetchBlob(meta.download_url, {
                       signal,
                       auth: false,
-                      credentials: "omit"
+                      credentials: isSameOrigin ? "same-origin" : "omit"
                     });
                     const ext = (blob.type && blob.type.indexOf("/") > -1) ? blob.type.split("/")[1] : "bin";
                     const fname = f.name ? (f.id + "_" + sanitizeName(f.name)) : (f.id + "." + sanitizeName(ext));
@@ -898,6 +957,10 @@ javascript: (async () => {
               }
               successes.push(detail);
               successIds.add(item.id);
+              if (!exportedSet.has(item.id)) {
+                S.progress.exported.push(item.id);
+                exportedSet.add(item.id);
+              }
               if (UI) UI.setStatus("Saved: " + title);
               addLog("✓ " + title + " (" + fmtMs(now() - t0) + ", files " + refs.length + ")");
             } catch (e) {
@@ -965,12 +1028,7 @@ javascript: (async () => {
           S.stats.batches = (S.stats.batches || 0) + 1;
           S.stats.batchMs = (S.stats.batchMs || 0) + batchWall;
           S.stats.chats = (S.stats.chats || 0) + successes.length;
-          const exportedSet = new Set(S.progress.exported || []);
-          for (const id of successIds)
-            if (!exportedSet.has(id)) {
-              S.progress.exported.push(id);
-              exportedSet.add(id);
-            } const moved = updatePendingAfterBatch();
+          const moved = updatePendingAfterBatch();
           saveDebounce(true);
           addLog("Batch done: exported " + successes.length + " chats in " + fmtMs(batchWall) + ". Pending " + S.progress.pending.length + ". Files +" + filesSaved + "/-" + filesFailed + ".");
           if (moved.requeueCount === batchItems.length) {
@@ -992,13 +1050,17 @@ javascript: (async () => {
         if (UI) UI.renderAll();
       }
     };
+    _exporter = Exporter;
     if (S.settings.autoRescan !== false && !S.run.isRunning && !Exporter.scanPromise) {
       setTimeout(() => {
         if (!S.run.isRunning) Exporter.rescan(false);
       }, 800);
     }
+    S.logs = [];
+    addLog("v10");
     addLog("UI ready. Exported " + (S.progress.exported || []).length + ", pending " + (S.progress.pending || []).length + ".");
     UI.renderAll();
+    UI.ensureTick();
   } catch (e) {
     console.error(e);
     alert("Convoviz bookmarklet error: " + (e && e.message || e));
