@@ -1,7 +1,7 @@
 javascript: (async () => {
   try {
     const KEY = "__cvz_export_state_v1__";
-    const VER = "cvz-bookmarklet-4.0";
+    const VER = "cvz-bookmarklet-4.1";
     const now = () => Date.now();
     const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
     const safeJsonParse = (s, fb) => {
@@ -189,10 +189,11 @@ javascript: (async () => {
         batch: 50,
         conc: 3,
         pause: 300,
-        autoRescan: true
+        autoRescan: true,
+        filterGizmoId: null
       },
       progress: {
-        exported: [],
+        exported: {},
         pending: [],
         dead: [],
         failCounts: {},
@@ -261,6 +262,12 @@ javascript: (async () => {
       if (!Array.isArray(out.progress.kfExported)) out.progress.kfExported = [];
       if (!Array.isArray(out.progress.kfPending)) out.progress.kfPending = [];
       if (!Array.isArray(out.progress.kfDead)) out.progress.kfDead = [];
+      if (Array.isArray(out.progress.exported)) {
+        const migrated = {};
+        for (var i = 0; i < out.progress.exported.length; i++) migrated[out.progress.exported[i]] = 0;
+        out.progress.exported = migrated;
+      }
+      if (!out.progress.exported || typeof out.progress.exported !== "object" || Array.isArray(out.progress.exported)) out.progress.exported = {};
       out.scan = {
         ...d.scan,
         ...(s.scan || {})
@@ -620,6 +627,7 @@ javascript: (async () => {
     window.__cvz_TaskList = TaskList;
     const UIImpl = {
       container: null,
+      _maximized: false,
       inject() {
         const existing = document.getElementById("cvz-resume-ui");
         if (existing) {
@@ -630,7 +638,7 @@ javascript: (async () => {
         const d = document.createElement("div");
         d.id = "cvz-resume-ui";
         d.style = "position:fixed;top:20px;right:20px;width:380px;max-width:calc(100vw - 40px);background:rgba(32,33,35,0.95);color:#ececf1;border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;z-index:2147483647;font-family:-apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 12px 24px rgba(0,0,0,0.35);backdrop-filter:blur(10px);";
-        d.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' + '<div style="font-weight:700;font-size:14px;">Convoviz Direct Export</div>' + '<button id="cvz-x" style="border:0;background:transparent;color:#ececf1;font-size:18px;line-height:18px;cursor:pointer;">\u00d7</button>' + '</div>' + '<div style="opacity:0.75;font-size:11px;margin-top:2px;">' + VER + (_useLocalStorage ? ' \u00b7 \u26A0 localStorage fallback \u2014 large exports may lose state' : ' \u00b7 state in IndexedDB') + '</div>' + '<div data-testid="cvz-stats" style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">' + '<div style="display:flex;gap:10px;align-items:center;font-size:12px;">' + '<div><b>Exported:</b> <span id="cvz-exported">0</span></div>' + '<div>\u00b7</div>' + '<div><b>Pending:</b> <span id="cvz-pending">0</span></div>' + '<div>\u00b7</div>' + '<div><b>Dead:</b> <span id="cvz-dead">0</span></div>' + '<div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;min-width:40px;">' + '<div id="cvz-bar" style="height:100%;width:0%;background:#10a37f;"></div>' + '</div>' + '</div>' + '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin-top:4px;">' + '<div><b>Projects:</b> <span id="cvz-projects">0</span></div>' + '<div>\u00b7</div>' + '<div><b>KF:</b> <span id="cvz-kf-count">0/0</span></div>' + '</div>' + '</div>' + '<div data-testid="cvz-controls" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + '<label style="font-size:11px;opacity:0.9;">Batch</label>' + '<input id="cvz-batch" type="number" min="1" max="500" style="width:60px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;" />' + '<button id="cvz-rescan" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;">Rescan</button>' + '<button id="cvz-start" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(16,163,127,0.6);background:rgba(16,163,127,0.15);color:#ececf1;cursor:pointer;font-weight:600;">Start</button>' + '<button id="cvz-stop" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-weight:600;">Stop</button>' + '</div>' + '<div id="cvz-status" style="margin-top:6px;font-size:11px;opacity:0.85;min-height:14px;"></div>' + '<div id="cvz-tasks" style="margin-top:6px;height:180px;overflow-y:auto;border-radius:10px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);padding:6px 8px;font-size:11px;"></div>' + '<textarea id="cvz-log" readonly style="margin-top:10px;height:80px;width:100%;box-sizing:border-box;resize:vertical;font-size:11px;white-space:pre-wrap;background:rgba(0,0,0,0.25);color:#ececf1;border:1px solid rgba(255,255,255,0.08);padding:8px;border-radius:10px;font-family:inherit;outline:none;"></textarea>' + '<div style="margin-top:10px;display:flex;justify-content:space-between;gap:8px;">' + '<button id="cvz-reset" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Reset</button>' + '<button id="cvz-dlstate" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Export state</button>' + '</div>';
+        d.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' + '<div style="font-weight:700;font-size:14px;">Convoviz Direct Export</div>' + '<div style="display:flex;gap:6px;align-items:center;">' + '<button id="cvz-max" style="border:0;background:transparent;color:#ececf1;font-size:14px;line-height:18px;cursor:pointer;opacity:0.7;" title="Maximize">\u26f6</button>' + '<button id="cvz-x" style="border:0;background:transparent;color:#ececf1;font-size:18px;line-height:18px;cursor:pointer;">\u00d7</button>' + '</div>' + '</div>' + '<div style="opacity:0.75;font-size:11px;margin-top:2px;">' + VER + (_useLocalStorage ? ' \u00b7 \u26A0 localStorage fallback \u2014 large exports may lose state' : ' \u00b7 state in IndexedDB') + '</div>' + '<div data-testid="cvz-stats" style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">' + '<div style="display:flex;gap:10px;align-items:center;font-size:12px;">' + '<div><b>Exported:</b> <span id="cvz-exported">0</span></div>' + '<div>\u00b7</div>' + '<div><b>Pending:</b> <span id="cvz-pending">0</span></div>' + '<div>\u00b7</div>' + '<div><b>Dead:</b> <span id="cvz-dead">0</span></div>' + '<div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;min-width:40px;">' + '<div id="cvz-bar" style="height:100%;width:0%;background:#10a37f;"></div>' + '</div>' + '</div>' + '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin-top:4px;">' + '<div><b>Projects:</b> <span id="cvz-projects">0</span></div>' + '<div>\u00b7</div>' + '<div><b>KF:</b> <span id="cvz-kf-count">0/0</span></div>' + '</div>' + '</div>' + '<div data-testid="cvz-controls" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + '<label style="font-size:11px;opacity:0.9;">Batch</label>' + '<input id="cvz-batch" type="number" min="1" max="500" style="width:60px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;" />' + '<button id="cvz-rescan" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;">Rescan</button>' + '<button id="cvz-start" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(16,163,127,0.6);background:rgba(16,163,127,0.15);color:#ececf1;cursor:pointer;font-weight:600;">Start</button>' + '<button id="cvz-stop" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-weight:600;">Stop</button>' + '</div>' + '<div id="cvz-project-filter" style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + '<label style="font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px;"><input id="cvz-single-proj" type="checkbox" style="margin:0;cursor:pointer;" /> Single project</label>' + '<select id="cvz-proj-select" style="flex:1;min-width:0;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;font-size:11px;display:none;"><option value="">(rescan first to load projects)</option></select>' + '</div>' + '<div id="cvz-status" style="margin-top:6px;font-size:11px;opacity:0.85;min-height:14px;"></div>' + '<div id="cvz-tasks" style="margin-top:6px;height:180px;overflow-y:auto;border-radius:10px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.08);padding:6px 8px;font-size:11px;"></div>' + '<textarea id="cvz-log" readonly style="margin-top:10px;height:80px;width:100%;box-sizing:border-box;resize:vertical;font-size:11px;white-space:pre-wrap;background:rgba(0,0,0,0.25);color:#ececf1;border:1px solid rgba(255,255,255,0.08);padding:8px;border-radius:10px;font-family:inherit;outline:none;"></textarea>' + '<div style="margin-top:10px;display:flex;justify-content:space-between;gap:8px;">' + '<button id="cvz-reset" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Reset</button>' + '<button id="cvz-dlstate" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Export state</button>' + '</div>';
         document.body.appendChild(d);
         this.container = d;
         if (!document.getElementById("cvz-spin-style")) {
@@ -641,6 +649,27 @@ javascript: (async () => {
         }
         d.querySelector("#cvz-x").onclick = () => {
           d.style.display = "none";
+        };
+        d.querySelector("#cvz-max").onclick = () => {
+          this._maximized = !this._maximized;
+          var m = this._maximized;
+          d.style.top = m ? "0" : "20px";
+          d.style.right = m ? "0" : "20px";
+          d.style.width = m ? "100vw" : "380px";
+          d.style.maxWidth = m ? "100vw" : "calc(100vw - 40px)";
+          d.style.height = m ? "100vh" : "";
+          d.style.borderRadius = m ? "0" : "12px";
+          d.style.display = m ? "flex" : "block";
+          d.style.flexDirection = m ? "column" : "";
+          var tasks = d.querySelector("#cvz-tasks");
+          if (tasks) tasks.style.flex = m ? "1" : "";
+          if (tasks) tasks.style.height = m ? "" : "180px";
+          var log = d.querySelector("#cvz-log");
+          if (log) log.style.flex = m ? "1" : "";
+          if (log) log.style.height = m ? "" : "80px";
+          var btn = d.querySelector("#cvz-max");
+          btn.textContent = m ? "\u2750" : "\u26f6";
+          btn.title = m ? "Restore" : "Maximize";
         };
         d.querySelector("#cvz-start").onclick = () => Exporter.start();
         d.querySelector("#cvz-stop").onclick = () => Exporter.stop();
@@ -674,6 +703,106 @@ javascript: (async () => {
           saveDebounce(true);
           this.renderAll();
         };
+        const singleProjCheck = d.querySelector("#cvz-single-proj");
+        const projSelect = d.querySelector("#cvz-proj-select");
+        singleProjCheck.checked = !!S.settings.filterGizmoId;
+        projSelect.style.display = S.settings.filterGizmoId ? "" : "none";
+        singleProjCheck.onchange = () => {
+          if (S.run.isRunning) {
+            singleProjCheck.checked = !!S.settings.filterGizmoId;
+            addLog("Stop first to change project filter.");
+            return;
+          }
+          if (!singleProjCheck.checked) {
+            S.settings.filterGizmoId = null;
+            projSelect.style.display = "none";
+            saveDebounce(true);
+            addLog("Project filter cleared. Will export all conversations.");
+            this.renderAll();
+          } else {
+            projSelect.style.display = "";
+            if (!(S.projects || []).length && !this._projectLoadPromise) {
+              this._loadProjectsOnly();
+            } else {
+              this._populateProjectSelect();
+            }
+            if (projSelect.value) {
+              S.settings.filterGizmoId = projSelect.value;
+              saveDebounce(true);
+            }
+          }
+        };
+        projSelect.onchange = () => {
+          if (S.run.isRunning) {
+            projSelect.value = S.settings.filterGizmoId || "";
+            addLog("Stop first to change project filter.");
+            return;
+          }
+          S.settings.filterGizmoId = projSelect.value || null;
+          saveDebounce(true);
+          if (projSelect.value) {
+            const name = projSelect.options[projSelect.selectedIndex].textContent;
+            addLog("Filter set to project: " + name);
+          }
+          this.renderAll();
+        };
+      },
+      _projectLoadPromise: null,
+      _projectLoadAbort: null,
+      _populateProjectSelect() {
+        const sel = this.container && this.container.querySelector("#cvz-proj-select");
+        if (!sel) return;
+        const current = S.settings.filterGizmoId || "";
+        const projects = S.projects || [];
+        var html = "";
+        if (this._projectLoadPromise) {
+          html = '<option value="">Loading projects\u2026</option>';
+        } else if (!projects.length) {
+          html = '<option value="">(no projects found)</option>';
+        } else {
+          html = '<option value="">-- select a project --</option>';
+          for (var i = 0; i < projects.length; i++) {
+            var p = projects[i];
+            var label = (p.emoji ? p.emoji + " " : "") + (p.name || p.gizmoId);
+            var selected = (p.gizmoId === current) ? " selected" : "";
+            html += '<option value="' + p.gizmoId + '"' + selected + '>' + label + '</option>';
+          }
+        }
+        sel.innerHTML = html;
+        sel.disabled = !!this._projectLoadPromise || !!S.run.isRunning;
+      },
+      _loadProjectsOnly() {
+        if (this._projectLoadPromise) return;
+        var self = this;
+        var ac = new AbortController();
+        this._projectLoadAbort = ac;
+        addLog("Loading projects\u2026");
+        var p = Net.getToken(ac.signal).then(function() {
+          return scanProjects(ac.signal, function(proj) {
+            if (self.container) {
+              var statusEl = self.container.querySelector("#cvz-status");
+              if (statusEl) statusEl.textContent = "Loading projects\u2026 found " + proj.name;
+            }
+          });
+        }).then(function(projects) {
+          S.projects = projects;
+          S.scan.totalProjects = projects.length;
+          saveDebounce(true);
+          addLog("Found " + projects.length + " projects.");
+        }).catch(function(e) {
+          if (e && e.name === "AbortError") {
+            addLog("Project load cancelled.");
+          } else {
+            addLog("Failed to load projects: " + (e && e.message || e));
+          }
+        }).then(function() {
+          self._projectLoadPromise = null;
+          self._projectLoadAbort = null;
+          self._populateProjectSelect();
+          self.renderAll();
+        });
+        this._projectLoadPromise = p;
+        this._populateProjectSelect();
       },
       setStatus(msg) {
         const el = this.container && this.container.querySelector("#cvz-status");
@@ -691,7 +820,7 @@ javascript: (async () => {
       },
       renderAll() {
         if (!this.container) return;
-        const exported = (S.progress.exported || []).length;
+        const exported = Object.keys(S.progress.exported || {}).length;
         const pending = (S.progress.pending || []).length;
         const dead = (S.progress.dead || []).length;
         const scanning = !!(_exporter && _exporter.scanPromise);
@@ -706,6 +835,11 @@ javascript: (async () => {
         var kfPend = (S.progress.kfPending || []).length;
         var kfTotal = kfExp + kfPend + (S.progress.kfDead || []).length;
         this.container.querySelector("#cvz-kf-count").textContent = kfExp + "/" + kfTotal;
+        var singleCheck = this.container.querySelector("#cvz-single-proj");
+        if (singleCheck) {
+          singleCheck.disabled = !!S.run.isRunning;
+          if (singleCheck.checked) this._populateProjectSelect();
+        }
         this.renderLogs();
         const done = exported;
         const tot = S.scan.total ? S.scan.total : (exported + pending);
@@ -779,13 +913,14 @@ javascript: (async () => {
       }
       return out;
     };
-    const scanConversations = async (signal, onPage) => {
+    const scanConversations = async (signal, onPage, knownIds) => {
       await Net.getToken(signal);
       const rawBatch = clamp(parseInt(S.settings.batch, 10) || 50, 1, 500);
       const pageSize = Math.min(rawBatch, 100);
       if (rawBatch > 100 && UI) UI.setStatus("Scan page size capped at 100 (API limit)");
       let offset = 0;
       const items = [];
+      let consecutiveKnownPages = 0;
       while (true) {
         if (UI) UI.setStatus("Scanning conversations\u2026 offset " + offset);
         const data = await Net.fetchJson("/backend-api/conversations?offset=" + offset + "&limit=" + pageSize + "&order=updated", {
@@ -795,60 +930,75 @@ javascript: (async () => {
         const got = (data && data.items) || [];
         if (!got.length) break;
         const pageItems = [];
+        let pageNewCount = 0;
         for (const it of got) {
           const item = {
             id: it.id,
             title: it.title || "",
-            update_time: it.update_time || it.updated_time || 0
+            update_time: it.update_time || it.updated_time || 0,
+            gizmo_id: it.gizmo_id || it.project_id || null
           };
           items.push(item);
           pageItems.push(item);
+          if (knownIds && !knownIds.has(it.id)) pageNewCount++;
         }
         if (onPage) onPage(pageItems);
         offset += got.length;
+        if (knownIds && pageNewCount === 0) {
+          consecutiveKnownPages++;
+          if (consecutiveKnownPages >= 2) {
+            if (UI) UI.setStatus("Scan: hit " + consecutiveKnownPages + " pages of known chats, stopping early.");
+            addLog("Scan early-exit at offset " + offset + " (" + consecutiveKnownPages + " consecutive known pages).");
+            break;
+          }
+        } else {
+          consecutiveKnownPages = 0;
+        }
         if (got.length < pageSize) break;
         if (data.total && offset >= data.total) break;
       }
       return items;
     };
     const scanProjects = async (signal, onProject) => {
+      const projects = [];
       let cursor = null;
       let page = 1;
-      const projects = [];
       while (true) {
         if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
-        let url = "/backend-api/gizmos/snorlax/sidebar?owned_only=true&conversations_per_gizmo=0";
-        if (cursor) url += "&cursor=" + encodeURIComponent(cursor);
+        let url = "/backend-api/projects?cursor=" + encodeURIComponent(cursor || "") + "&limit=100";
         if (UI) UI.setStatus("Scanning projects\u2026 (page " + page + ")");
         const data = await Net.fetchJson(url, { signal, auth: true });
-        const gizmos = (data && data.items) || [];
-        for (const g of gizmos) {
-          const def = (g && g.resource && g.resource.gizmo) || g.gizmo || g;
-          const gizmoId = def.id || (g.resource && g.resource.gizmo && g.resource.gizmo.id) || null;
-          if (!gizmoId) continue;
+        if (page === 1) console.log("convoviz: projects API response sample", data);
+        const items = (data && data.items) || [];
+        if (!items.length) break;
+        for (const item of items) {
+          const projId = item.id || item.project_id || null;
+          if (!projId) {
+            if (page === 1) console.log("convoviz: skipped project item (no id)", item);
+            continue;
+          }
           const filesList = [];
-          const context = (g.resource && g.resource.context) || {};
-          const contextFiles = context.files || [];
-          for (const f of contextFiles) {
-            if (f && f.file_id) {
+          const projFiles = item.files || item.knowledge_files || [];
+          for (const f of projFiles) {
+            if (f && (f.file_id || f.id)) {
               filesList.push({
-                fileId: f.file_id,
-                name: f.name || "",
-                type: f.type || "",
+                fileId: f.file_id || f.id,
+                name: f.name || f.filename || "",
+                type: f.type || f.mime_type || "",
                 size: f.size || 0
               });
             }
           }
           const proj = {
-            gizmoId: gizmoId,
-            name: def.display && def.display.name || def.name || "",
-            emoji: def.display && def.display.profile_emoji || "",
-            theme: def.display && def.display.accent_color || "",
-            instructions: def.instructions || "",
-            memoryEnabled: !!(context.memory_enabled),
-            memoryScope: context.memory_scope || "",
+            gizmoId: projId,
+            name: item.name || item.title || "",
+            emoji: item.emoji || "",
+            theme: item.color || item.accent_color || "",
+            instructions: item.instructions || "",
+            memoryEnabled: false,
+            memoryScope: "",
             files: filesList,
-            raw: g.resource || g
+            raw: item
           };
           projects.push(proj);
           if (onProject) onProject(proj);
@@ -859,9 +1009,10 @@ javascript: (async () => {
       }
       return projects;
     };
-    const scanProjectConversations = async (gizmoId, signal, onPage) => {
+    const scanProjectConversations = async (gizmoId, signal, onPage, knownIds) => {
       let cursor = "0";
       const items = [];
+      let consecutiveKnownPages = 0;
       while (true) {
         if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
         const url = "/backend-api/gizmos/" + encodeURIComponent(gizmoId) + "/conversations?cursor=" + encodeURIComponent(cursor);
@@ -869,6 +1020,7 @@ javascript: (async () => {
         const got = (data && data.items) || [];
         if (!got.length) break;
         const pageItems = [];
+        let pageNewCount = 0;
         for (const it of got) {
           const item = {
             id: it.id,
@@ -878,8 +1030,15 @@ javascript: (async () => {
           };
           items.push(item);
           pageItems.push(item);
+          if (knownIds && !knownIds.has(it.id)) pageNewCount++;
         }
         if (onPage) onPage(pageItems);
+        if (knownIds && pageNewCount === 0) {
+          consecutiveKnownPages++;
+          if (consecutiveKnownPages >= 2) break;
+        } else {
+          consecutiveKnownPages = 0;
+        }
         cursor = (data && data.cursor) || null;
         if (!cursor) break;
       }
@@ -944,24 +1103,31 @@ javascript: (async () => {
             saveDebounce(true);
             if (UI) UI.renderAll();
             addLog("Rescan started\u2026");
-            const exportedSet = new Set(S.progress.exported || []);
+            const prevSnapshot = Array.isArray(S.scan.snapshot) ? S.scan.snapshot : [];
+            const knownIds = new Set(prevSnapshot.map(function(x) { return x[0]; }));
+            if (knownIds.size) addLog("Incremental scan: " + knownIds.size + " known conversations from previous scan.");
+            const exportedMap = S.progress.exported || {};
             const deadSet = new Set((S.progress.dead || []).map(x => x.id));
             const pendingSet = new Set((S.progress.pending || []).map(x => x.id));
             const onPage = (pageItems) => {
               let added = 0;
               for (const it of pageItems) {
-                if (!exportedSet.has(it.id) && !deadSet.has(it.id) && !pendingSet.has(it.id)) {
-                  S.progress.pending.push(it);
-                  pendingSet.add(it.id);
-                  added++;
+                if (deadSet.has(it.id) || pendingSet.has(it.id)) continue;
+                const prevTime = exportedMap[it.id];
+                if (prevTime !== undefined) {
+                  const curTime = it.update_time || 0;
+                  if (!curTime || !prevTime || curTime === prevTime) continue;
                 }
+                S.progress.pending.push(it);
+                pendingSet.add(it.id);
+                added++;
               }
               if (added) {
                 saveDebounce(false);
                 if (UI) UI.renderAll();
               }
             };
-            const items = await scanConversations(ac.signal, onPage);
+            const items = await scanConversations(ac.signal, onPage, knownIds.size ? knownIds : null);
             addLog("Regular scan done. Found " + items.length + " conversations.");
             let projectConvItems = [];
             try {
@@ -978,7 +1144,7 @@ javascript: (async () => {
                 if (ac.signal && ac.signal.aborted) throw new DOMException("Aborted", "AbortError");
                 try {
                   if (UI) UI.setStatus("Scanning project chats: " + proj.name + " (" + (pi + 1) + "/" + projects.length + ")");
-                  const projItems = await scanProjectConversations(proj.gizmoId, ac.signal, onPage);
+                  const projItems = await scanProjectConversations(proj.gizmoId, ac.signal, onPage, knownIds.size ? knownIds : null);
                   for (const it of projItems) projectConvItems.push(it);
                   addLog("Project " + proj.name + ": " + projItems.length + " conversations.");
                 } catch (pe) {
@@ -1014,18 +1180,21 @@ javascript: (async () => {
             S.progress.kfPending = kfPendingNew;
             saveDebounce(false);
             if (kfPendingNew.length) addLog("Knowledge files: " + kfPendingNew.length + " pending.");
-            const allItems = items.concat(projectConvItems);
-            S.changes = computeChanges(S.scan.snapshot, allItems, S.progress.pending);
+            const scannedItems = items.concat(projectConvItems);
+            const scannedIds = new Set(scannedItems.map(function(x) { return x.id; }));
+            const carryOver = prevSnapshot.filter(function(x) { return !scannedIds.has(x[0]); });
+            const allItems = scannedItems.map(function(x) { return [x.id, x.update_time || 0]; }).concat(carryOver);
+            S.changes = computeChanges(S.scan.snapshot, scannedItems, S.progress.pending);
             S.scan = {
               at: now(),
               total: allItems.length,
               totalProjects: S.scan.totalProjects || 0,
-              snapshot: allItems.map(x => [x.id, x.update_time || 0])
+              snapshot: allItems
             };
             saveDebounce(true);
             TaskList.update("scan", {status: "done", detail: null});
             if (UI) UI.setStatus("Rescan done.");
-            addLog("Rescan done. Total " + allItems.length + " (" + items.length + " regular + " + projectConvItems.length + " project), pending " + S.progress.pending.length + ".");
+            addLog("Rescan done. Total " + allItems.length + " (scanned " + scannedItems.length + ", carried " + carryOver.length + "), pending " + S.progress.pending.length + ".");
             if (UI) UI.renderAll();
           } catch (e) {
             if (e && e.name === "AbortError") {
@@ -1083,26 +1252,37 @@ javascript: (async () => {
           S.run.lastPhase = "run";
           saveDebounce(true);
           if (UI) UI.renderAll();
+          const filterGid = S.settings.filterGizmoId || null;
+          if (filterGid) {
+            const projName = ((S.projects || []).find(function(p) { return p.gizmoId === filterGid; }) || {}).name || filterGid;
+            addLog("Single-project mode: " + projName);
+          }
           if (UI) UI.setStatus("Running…");
+          const _eligibleConvs = function() {
+            return filterGid ? S.progress.pending.filter(function(x) { return x.gizmo_id === filterGid; }).length : S.progress.pending.length;
+          };
+          const _eligibleKf = function() {
+            return filterGid ? (S.progress.kfPending || []).filter(function(x) { return x.projectId === filterGid; }).length : (S.progress.kfPending || []).length;
+          };
           while (S.run.isRunning) {
-            if (!S.progress.pending.length && this.scanPromise) {
+            if (!_eligibleConvs() && this.scanPromise) {
               if (UI) UI.setStatus("Waiting for scan to find conversations\u2026");
               await sleep(500, ac.signal);
               continue;
             }
-            if (!S.progress.pending.length || this.stopRequested) break;
+            if (!_eligibleConvs() || this.stopRequested) break;
             await this.exportOneBatch(ac.signal);
             if (this.stopRequested) break;
           }
-          if (!this.stopRequested && S.progress.kfPending && S.progress.kfPending.length) {
+          if (!this.stopRequested && _eligibleKf()) {
             addLog("Conversations done. Starting knowledge file export\u2026");
             while (S.run.isRunning) {
-              if (!S.progress.kfPending.length || this.stopRequested) break;
+              if (!_eligibleKf() || this.stopRequested) break;
               await this.exportKnowledgeBatch(ac.signal);
               if (this.stopRequested) break;
             }
           }
-          const anyPending = S.progress.pending.length || (S.progress.kfPending || []).length;
+          const anyPending = _eligibleConvs() || _eligibleKf();
           if (UI) UI.setStatus(anyPending ? "Paused." : "\u2705 All done.");
           addLog(anyPending ? "Paused." : "All done.");
         } catch (e) {
@@ -1142,12 +1322,14 @@ javascript: (async () => {
         const batchSize = clamp(parseInt(S.settings.batch, 10) || 50, 1, 500);
         const conc = clamp(parseInt(S.settings.conc, 10) || 3, 1, 8);
         const pause = clamp(parseInt(S.settings.pause, 10) || 300, 0, 5000);
-        const batchItems = S.progress.pending.slice(0, batchSize);
+        const filterGid = S.settings.filterGizmoId || null;
+        const eligible = filterGid ? S.progress.pending.filter(function(x) { return x.gizmo_id === filterGid; }) : S.progress.pending;
+        const batchItems = eligible.slice(0, batchSize);
         if (!batchItems.length) return;
         const zip = new ZipLite();
         const successes = [];
         const successIds = new Set();
-        const exportedSet = new Set(S.progress.exported || []);
+        const exportedMap = S.progress.exported || {};
         const failInfo = {};
         let filesSaved = 0,
           filesFailed = 0;
@@ -1201,10 +1383,8 @@ javascript: (async () => {
               }
               successes.push(detail);
               successIds.add(item.id);
-              if (!exportedSet.has(item.id)) {
-                S.progress.exported.push(item.id);
-                exportedSet.add(item.id);
-              }
+              exportedMap[item.id] = item.update_time || 0;
+              S.progress.exported = exportedMap;
               TaskList.update(taskId, {status: "done", detail: null});
               addLog("✓ " + title + " (" + fmtMs(now() - t0) + ", files " + refs.length + ")");
             } catch (e) {
@@ -1227,7 +1407,8 @@ javascript: (async () => {
         }
         const batchWall = now() - tBatchStart;
         const updatePendingAfterBatch = () => {
-          const rest = S.progress.pending.slice(batchItems.length);
+          const batchIdSet = new Set(batchItems.map(function(x) { return x.id; }));
+          const rest = S.progress.pending.filter(function(x) { return !batchIdSet.has(x.id); });
           const requeue = [],
             dead = [];
           const fc = S.progress.failCounts || {};
@@ -1307,7 +1488,9 @@ javascript: (async () => {
         const batchSize = clamp(parseInt(S.settings.batch, 10) || 50, 1, 500);
         const conc = clamp(parseInt(S.settings.conc, 10) || 3, 1, 8);
         const pause = clamp(parseInt(S.settings.pause, 10) || 300, 0, 5000);
-        const batchItems = S.progress.kfPending.slice(0, batchSize);
+        const filterGid = S.settings.filterGizmoId || null;
+        const kfEligible = filterGid ? S.progress.kfPending.filter(function(x) { return x.projectId === filterGid; }) : S.progress.kfPending;
+        const batchItems = kfEligible.slice(0, batchSize);
         if (!batchItems.length) return;
         const zip = new ZipLite();
         const successes = [];
@@ -1383,7 +1566,8 @@ javascript: (async () => {
         }
         const batchWall = now() - tBatchStart;
         const updateKfPendingAfterBatch = () => {
-          const rest = S.progress.kfPending.slice(batchItems.length);
+          const batchFileIdSet = new Set(batchItems.map(function(x) { return x.fileId; }));
+          const rest = S.progress.kfPending.filter(function(x) { return !batchFileIdSet.has(x.fileId); });
           const requeue = [];
           const dead = [];
           const fc = S.progress.kfFailCounts || {};
@@ -1470,16 +1654,10 @@ javascript: (async () => {
     window.__cvz_Exporter = Exporter;
     window.__cvz_S = S;
     window.__cvz_Net = Net;
-    if (S.settings.autoRescan !== false && !S.run.isRunning && !Exporter.scanPromise) {
-      setTimeout(() => {
-        if (!S.run.isRunning) Exporter.rescan(false);
-      }, 800);
-    }
     S.logs = [];
     addLog(VER);
-    addLog("UI ready. Exported " + (S.progress.exported || []).length + ", pending " + (S.progress.pending || []).length + ".");
+    addLog("UI ready. Exported " + Object.keys(S.progress.exported || {}).length + ", pending " + (S.progress.pending || []).length + ". Click Rescan then Start.");
     UI.renderAll();
-    UI.ensureTick();
   } catch (e) {
     console.error(e);
     alert("Convoviz bookmarklet error: " + (e && e.message || e));
