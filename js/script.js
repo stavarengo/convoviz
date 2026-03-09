@@ -1,7 +1,7 @@
 javascript: (async () => {
   try {
     const KEY = "__cvz_export_state_v1__";
-    const VER = "cvz-bookmarklet-4.1";
+    const VER = "cvz-bookmarklet-4.2";
     const now = () => Date.now();
     const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
     const safeJsonParse = (s, fb) => {
@@ -960,45 +960,47 @@ javascript: (async () => {
       return items;
     };
     const scanProjects = async (signal, onProject) => {
-      const projects = [];
       let cursor = null;
       let page = 1;
+      const projects = [];
       while (true) {
         if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
-        let url = "/backend-api/projects?cursor=" + encodeURIComponent(cursor || "") + "&limit=100";
+        let url = "/backend-api/gizmos/snorlax/sidebar?owned_only=true&conversations_per_gizmo=0";
+        if (cursor) url += "&cursor=" + encodeURIComponent(cursor);
         if (UI) UI.setStatus("Scanning projects\u2026 (page " + page + ")");
         const data = await Net.fetchJson(url, { signal, auth: true });
-        if (page === 1) console.log("convoviz: projects API response sample", data);
         const items = (data && data.items) || [];
         if (!items.length) break;
-        for (const item of items) {
-          const projId = item.id || item.project_id || null;
-          if (!projId) {
-            if (page === 1) console.log("convoviz: skipped project item (no id)", item);
-            continue;
-          }
-          const filesList = [];
-          const projFiles = item.files || item.knowledge_files || [];
-          for (const f of projFiles) {
+        for (var gi = 0; gi < items.length; gi++) {
+          var g = items[gi];
+          var inner = (g && g.gizmo) || {};
+          var def = inner.gizmo || {};
+          var gizmoId = def.id || null;
+          if (!gizmoId) continue;
+          var filesList = [];
+          var rawFiles = inner.files || [];
+          for (var fi = 0; fi < rawFiles.length; fi++) {
+            var f = rawFiles[fi];
             if (f && (f.file_id || f.id)) {
               filesList.push({
                 fileId: f.file_id || f.id,
-                name: f.name || f.filename || "",
-                type: f.type || f.mime_type || "",
+                name: f.name || "",
+                type: f.type || "",
                 size: f.size || 0
               });
             }
           }
-          const proj = {
-            gizmoId: projId,
-            name: item.name || item.title || "",
-            emoji: item.emoji || "",
-            theme: item.color || item.accent_color || "",
-            instructions: item.instructions || "",
-            memoryEnabled: false,
-            memoryScope: "",
+          var disp = def.display || {};
+          var proj = {
+            gizmoId: gizmoId,
+            name: disp.name || def.name || "",
+            emoji: disp.emoji || disp.profile_emoji || "",
+            theme: disp.theme || disp.accent_color || "",
+            instructions: def.instructions || "",
+            memoryEnabled: !!(def.memory_enabled),
+            memoryScope: def.memory_scope || "",
             files: filesList,
-            raw: item
+            raw: g
           };
           projects.push(proj);
           if (onProject) onProject(proj);
