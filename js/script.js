@@ -1,7 +1,7 @@
 javascript: (async () => {
   try {
     const KEY = "__cvz_export_state_v1__";
-    const VER = "cvz-bookmarklet-4.1.1";
+    const VER = "cvz-bookmarklet-4.1";
     const now = () => Date.now();
     const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
     const safeJsonParse = (s, fb) => {
