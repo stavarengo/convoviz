@@ -1,7 +1,7 @@
 javascript: (async () => {
   try {
     const KEY = "__cvz_export_state_v1__";
-    const VER = "cvz-bookmarklet-4.2";
+    const VER = "cvz-bookmarklet-4.3";
     const now = () => Date.now();
     const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
     const safeJsonParse = (s, fb) => {
@@ -1114,7 +1114,17 @@ javascript: (async () => {
             const onPage = (pageItems) => {
               let added = 0;
               for (const it of pageItems) {
-                if (deadSet.has(it.id) || pendingSet.has(it.id)) continue;
+                if (deadSet.has(it.id)) continue;
+                if (pendingSet.has(it.id)) {
+                  if (it.gizmo_id) {
+                    for (var pi2 = 0; pi2 < S.progress.pending.length; pi2++) {
+                      if (S.progress.pending[pi2].id === it.id && !S.progress.pending[pi2].gizmo_id) {
+                        S.progress.pending[pi2].gizmo_id = it.gizmo_id;
+                      }
+                    }
+                  }
+                  continue;
+                }
                 const prevTime = exportedMap[it.id];
                 if (prevTime !== undefined) {
                   const curTime = it.update_time || 0;
