@@ -1,7 +1,7 @@
 javascript: (async () => {
   try {
     const KEY = "__cvz_export_state_v1__";
-    const VER = "cvz-bookmarklet-4.4";
+    const VER = "cvz-bookmarklet-4.5";
     const now = () => Date.now();
     const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
     const safeJsonParse = (s, fb) => {
@@ -1254,7 +1254,8 @@ javascript: (async () => {
           if (UI) UI.setStatus("Preparing…");
           await Net.getToken(ac.signal);
           const scanAge = S.scan.at ? (now() - S.scan.at) : Infinity;
-          const needsScan = !Array.isArray(S.progress.pending) || !S.progress.pending.length || (S.settings.autoRescan !== false && scanAge > 6 * 60 * 60 * 1000);
+          const hasPending = Array.isArray(S.progress.pending) && S.progress.pending.length;
+          const needsScan = !hasPending || (S.settings.autoRescan !== false && scanAge > 6 * 60 * 60 * 1000) || !!S.settings.filterGizmoId;
           if (needsScan && !this.scanPromise) {
             this.rescan(true);
           }
