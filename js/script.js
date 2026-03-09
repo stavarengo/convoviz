@@ -1,7 +1,7 @@
 javascript: (async () => {
   try {
     const KEY = "__cvz_export_state_v1__";
-    const VER = "cvz-bookmarklet-4.3";
+    const VER = "cvz-bookmarklet-4.4";
     const now = () => Date.now();
     const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
     const safeJsonParse = (s, fb) => {
@@ -1111,17 +1111,20 @@ javascript: (async () => {
             const exportedMap = S.progress.exported || {};
             const deadSet = new Set((S.progress.dead || []).map(x => x.id));
             const pendingSet = new Set((S.progress.pending || []).map(x => x.id));
+            const pendingById = {};
+            for (var pi2 = 0; pi2 < S.progress.pending.length; pi2++) {
+              pendingById[S.progress.pending[pi2].id] = S.progress.pending[pi2];
+            }
             const onPage = (pageItems) => {
               let added = 0;
               for (const it of pageItems) {
                 if (deadSet.has(it.id)) continue;
                 if (pendingSet.has(it.id)) {
-                  if (it.gizmo_id) {
-                    for (var pi2 = 0; pi2 < S.progress.pending.length; pi2++) {
-                      if (S.progress.pending[pi2].id === it.id && !S.progress.pending[pi2].gizmo_id) {
-                        S.progress.pending[pi2].gizmo_id = it.gizmo_id;
-                      }
-                    }
+                  var existing = pendingById[it.id];
+                  if (existing) {
+                    if (it.gizmo_id) existing.gizmo_id = it.gizmo_id;
+                    if (it.update_time) existing.update_time = it.update_time;
+                    if (it.title && !existing.title) existing.title = it.title;
                   }
                   continue;
                 }
@@ -1132,6 +1135,7 @@ javascript: (async () => {
                 }
                 S.progress.pending.push(it);
                 pendingSet.add(it.id);
+                pendingById[it.id] = it;
                 added++;
               }
               if (added) {
