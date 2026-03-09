@@ -648,4 +648,320 @@ test.describe("US-003: Wire task list to export pipeline", () => {
     expect(result).toBeTruthy();
     expect(result.projectName).toBe("My App");
   });
+
+  test("exportOneBatch skips project knowledge file IDs from downloads", async ({
+    page,
+  }) => {
+    // Track which file IDs are requested via /backend-api/files/download/
+    const downloadedFileIds = [];
+    await page.route("**/backend-api/files/download/**", (route) => {
+      const url = route.request().url();
+      const fileId = url
+        .split("/backend-api/files/download/")[1]
+        .split("?")[0];
+      downloadedFileIds.push(fileId);
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "success",
+          download_url: "https://chatgpt.com/fake-download/" + fileId,
+        }),
+      });
+    });
+
+    // Override conversation route to include both project file and user file
+    await page.route(
+      "**/backend-api/conversation/conv-proj-filter",
+      (route) => {
+        route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            title: "Project Filter Test",
+            mapping: {
+              node1: {
+                message: {
+                  metadata: {
+                    attachments: [
+                      { id: "proj-file-001", name: "project-knowledge.txt" },
+                      { id: "user-file-999", name: "user-upload.pdf" },
+                      { id: "proj-file-002", name: "another-project-file.md" },
+                    ],
+                  },
+                  content: { parts: [] },
+                },
+              },
+            },
+          }),
+        });
+      }
+    );
+
+    await prepareForExport(page);
+
+    const result = await page.evaluate(async () => {
+      var TL = window.__cvz_TaskList;
+      var Exporter = window.__cvz_Exporter;
+      var S = window.__cvz_S;
+
+      // Set up projects with knowledge files
+      S.projects = [
+        {
+          gizmoId: "gizmo-proj-1",
+          name: "Test Project",
+          files: [
+            { fileId: "proj-file-001", name: "project-knowledge.txt", type: "text", size: 100 },
+            { fileId: "proj-file-002", name: "another-project-file.md", type: "text", size: 200 },
+          ],
+        },
+      ];
+
+      S.progress.pending = [
+        { id: "conv-proj-filter", title: "Project Filter Test", gizmo_id: "gizmo-proj-1" },
+      ];
+      S.settings.batch = 10;
+      S.settings.conc = 1;
+      S.settings.pause = 0;
+
+      var ac = new AbortController();
+      await Exporter.exportOneBatch(ac.signal);
+
+      var task = TL._tasks.find(function (t) {
+        return t.id === "conv-conv-proj-filter";
+      });
+      return task ? { status: task.status } : null;
+    });
+
+    // The conversation should still export successfully
+    expect(result).toBeTruthy();
+    expect(result.status).toBe("done");
+
+    // Project file IDs should NOT have been requested
+    expect(downloadedFileIds).not.toContain("proj-file-001");
+    expect(downloadedFileIds).not.toContain("proj-file-002");
+
+    // User file ID SHOULD have been requested
+    expect(downloadedFileIds).toContain("user-file-999");
+  });
+
+  test("exportOneBatch passes all refs through when S.projects is empty", async ({
+    page,
+  }) => {
+    // Track which file IDs are requested
+    const downloadedFileIds = [];
+    await page.route("**/backend-api/files/download/**", (route) => {
+      const url = route.request().url();
+      const fileId = url
+        .split("/backend-api/files/download/")[1]
+        .split("?")[0];
+      downloadedFileIds.push(fileId);
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "success",
+          download_url: "https://chatgpt.com/fake-download/" + fileId,
+        }),
+      });
+    });
+
+    // Override conversation route with file attachments
+    await page.route(
+      "**/backend-api/conversation/conv-no-proj",
+      (route) => {
+        route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            title: "No Project Test",
+            mapping: {
+              node1: {
+                message: {
+                  metadata: {
+                    attachments: [
+                      { id: "file-aaa", name: "doc.pdf" },
+                      { id: "file-bbb", name: "pic.png" },
+                    ],
+                  },
+                  content: { parts: [] },
+                },
+              },
+            },
+          }),
+        });
+      }
+    );
+
+    await prepareForExport(page);
+
+    await page.evaluate(async () => {
+      var Exporter = window.__cvz_Exporter;
+      var S = window.__cvz_S;
+
+      // No projects set (or empty)
+      S.projects = [];
+
+      S.progress.pending = [
+        { id: "conv-no-proj", title: "No Project Test" },
+      ];
+      S.settings.batch = 10;
+      S.settings.conc = 1;
+      S.settings.pause = 0;
+
+      var ac = new AbortController();
+      await Exporter.exportOneBatch(ac.signal);
+    });
+
+    // All file IDs should have been requested (no filtering)
+    expect(downloadedFileIds).toContain("file-aaa");
+    expect(downloadedFileIds).toContain("file-bbb");
+  });
+
+  test("files count in success log reflects only conversation-specific files", async ({
+    page,
+  }) => {
+    // Override conversation route to include both project file and user file
+    await page.route(
+      "**/backend-api/conversation/conv-count-test",
+      (route) => {
+        route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            title: "Count Test",
+            mapping: {
+              node1: {
+                message: {
+                  metadata: {
+                    attachments: [
+                      { id: "proj-file-count", name: "project.txt" },
+                      { id: "user-file-count", name: "user.pdf" },
+                    ],
+                  },
+                  content: { parts: [] },
+                },
+              },
+            },
+          }),
+        });
+      }
+    );
+
+    await prepareForExport(page);
+
+    const logs = await page.evaluate(async () => {
+      var Exporter = window.__cvz_Exporter;
+      var S = window.__cvz_S;
+
+      // Set up project with one of the files
+      S.projects = [
+        {
+          gizmoId: "gizmo-count",
+          name: "Count Project",
+          files: [
+            { fileId: "proj-file-count", name: "project.txt", type: "text", size: 50 },
+          ],
+        },
+      ];
+
+      S.progress.pending = [
+        { id: "conv-count-test", title: "Count Test", gizmo_id: "gizmo-count" },
+      ];
+      S.settings.batch = 10;
+      S.settings.conc = 1;
+      S.settings.pause = 0;
+
+      // Clear existing logs to isolate
+      S.logs = [];
+
+      var ac = new AbortController();
+      await Exporter.exportOneBatch(ac.signal);
+
+      return S.logs;
+    });
+
+    // Find the success log line for this conversation
+    const successLog = logs.find(function (m) {
+      return m.includes("Count Test") && m.includes("files ");
+    });
+    expect(successLog).toBeTruthy();
+    // Should show "files 1" (only the user file, not the project file)
+    expect(successLog).toContain("files 1");
+  });
+
+  test("extractFileRefs strips file-service:// prefix from asset pointers", async ({
+    page,
+  }) => {
+    // Track which file IDs are requested via /backend-api/files/download/
+    const downloadedFileIds = [];
+    await page.route("**/backend-api/files/download/**", (route) => {
+      const url = route.request().url();
+      const fileId = url
+        .split("/backend-api/files/download/")[1]
+        .split("?")[0];
+      downloadedFileIds.push(fileId);
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "success",
+          download_url: "https://chatgpt.com/fake-download/" + fileId,
+        }),
+      });
+    });
+
+    // Override conversation route with a file-service:// asset pointer
+    await page.route(
+      "**/backend-api/conversation/conv-file-service",
+      (route) => {
+        route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            title: "File Service Test",
+            mapping: {
+              node1: {
+                message: {
+                  metadata: { attachments: [] },
+                  content: {
+                    parts: [
+                      {
+                        content_type: "image_asset_pointer",
+                        asset_pointer: "file-service://file-test123",
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          }),
+        });
+      }
+    );
+
+    await prepareForExport(page);
+
+    const result = await page.evaluate(async () => {
+      var Exporter = window.__cvz_Exporter;
+      var S = window.__cvz_S;
+      var TL = window.__cvz_TaskList;
+
+      S.progress.pending = [
+        { id: "conv-file-service", title: "File Service Test" },
+      ];
+      S.settings.batch = 10;
+      S.settings.conc = 1;
+      S.settings.pause = 0;
+
+      var ac = new AbortController();
+      await Exporter.exportOneBatch(ac.signal);
+
+      var task = TL._tasks.find(function (t) {
+        return t.id === "conv-conv-file-service";
+      });
+      return task ? { status: task.status } : null;
+    });
+
+    // The conversation should export successfully
+    expect(result).toBeTruthy();
+    expect(result.status).toBe("done");
+
+    // The download should be attempted for the stripped file ID, not the full URI
+    expect(downloadedFileIds).toContain("file-test123");
+    expect(downloadedFileIds).not.toContain("file-service://file-test123");
+  });
 });

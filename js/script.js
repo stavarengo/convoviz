@@ -898,7 +898,7 @@ javascript: (async () => {
         if (Array.isArray(parts)) {
           for (const p of parts) {
             if (p && p.content_type === "image_asset_pointer" && p.asset_pointer) {
-              const id = String(p.asset_pointer).replace("sediment://", "");
+              const id = String(p.asset_pointer).replace(/^(?:sediment|file-service):\/\//, "");
               if (id && !seen.has(id)) {
                 seen.add(id);
                 out.push({
@@ -1352,6 +1352,11 @@ javascript: (async () => {
         const queue = batchItems.slice();
         const tBatchStart = now();
         addLog("Batch starting: " + batchItems.length + " chats (conc " + conc + ").");
+        const projectFileIds = new Set(
+          (S.projects || []).flatMap(function(p) {
+            return (p.files || []).map(function(f) { return f.fileId; });
+          })
+        );
         const worker = async () => {
           while (queue.length && !(signal && signal.aborted)) {
             const item = queue.shift();
@@ -1365,7 +1370,8 @@ javascript: (async () => {
                 signal,
                 auth: true
               });
-              const refs = extractFileRefs(detail);
+              const allRefs = extractFileRefs(detail);
+              const refs = allRefs.filter(function(f) { return !projectFileIds.has(f.id); });
               if (refs.length) TaskList.update(taskId, {detail: "downloading 1/" + refs.length + " files"});
               for (let i = 0; i < refs.length; i++) {
                 if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");

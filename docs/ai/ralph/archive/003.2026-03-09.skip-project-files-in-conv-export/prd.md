@@ -22,7 +22,7 @@ Both issues are fixable with small, targeted changes in `js/script.js`.
 ## User Stories
 
 ### US-001: Filter project knowledge files from per-conversation downloads
-**Status:** pending
+**Status:** done
 **Description:** As a user exporting conversations, I want project knowledge files to be skipped during per-conversation file downloads so that the export completes faster without hundreds of spurious HTTP 500 errors.
 
 **Acceptance Criteria:**
@@ -47,7 +47,7 @@ Both issues are fixable with small, targeted changes in `js/script.js`.
 - [ ] Existing tests in `js/tests/export-pipeline.spec.js` continue to pass unchanged
 
 ### US-002: Strip `file-service://` prefix from asset pointers
-**Status:** pending
+**Status:** done
 **Description:** As a user exporting conversations with `file-service://` asset pointers, I want the prefix stripped so the file ID is valid and the download can succeed.
 
 **Acceptance Criteria:**
