@@ -23,5 +23,8 @@ docs/ai/ralph/current
 # Playwright / Node.js (bookmarklet tests)
 node_modules/
 test-results/
-package.json
-package-lock.json
+/package.json
+/package-lock.json
+
+# js-exporter build output
+js-exporter/dist/

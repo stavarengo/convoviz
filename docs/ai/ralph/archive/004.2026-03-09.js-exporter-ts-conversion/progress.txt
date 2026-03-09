@@ -1,0 +1,216 @@
+# PRD: Convert js/script.js to TypeScript App
+
+Base commit: 3ce73a3f8138f32c963e01607b262246676cd821
+
+## Codebase Patterns
+
+Squash from: b72c7af67165253769258b312614e03f6c6eecb1
+
+- Root `.gitignore` has `/package.json` and `/package-lock.json` (root-only); `node_modules/` is global. `js-exporter/package.json` is NOT ignored.
+- `js-exporter/` uses npm (not yarn/pnpm/bun) per PRD requirement.
+- `vitest.config.ts` needs `passWithNoTests: true` to exit 0 when no test files exist.
+- `tsconfig.json` needs at least one `.ts` file in `src/` or `tsc --noEmit` fails with TS18003. `src/index.ts` with `export {};` serves as placeholder.
+- Empty directories tracked via `.gitkeep` files (remove when real files are added).
+- When testing async rejection with fake timers, attach `.catch((e) => e)` before `vi.advanceTimersByTimeAsync()` to avoid unhandled rejection warnings.
+- All shared types live in `src/types.ts`. Import with `import type { ... } from "../types"` from module files, or `"./types"` from `src/` root.
+- `kfExported` items share the `KfPendingItem` shape (no extra fields). `DeadItem` and `KfDeadItem` extend their pending counterparts with `lastError`.
+- `tsconfig.json` only includes `src/`; test files are not typechecked by `npm run typecheck`. Vitest handles test compilation at runtime.
+- `Uint8Array` spread into `Blob` constructor fails TS strict typecheck. Cast with `as BlobPart[]`.
+- When dynamically assigning properties via `for..in` on a typed object, use double cast: `(obj as unknown as Record<string, unknown>)[k]`.
+- jsdom normalizes CSS values (e.g., `0.0%` becomes `0%`). Use `parseFloat(el.style.width)` in tests instead of string-matching.
+- jsdom's `Blob` may lack `arrayBuffer()`. When testing code that calls `blob.arrayBuffer()`, polyfill it via `FileReader` or use a `makeBlob()` helper in tests.
+- `main.ts` IIFE auto-executes on import. In tests, stub `alert` and `console.error` before importing to suppress jsdom noise. The IIFE fails gracefully (assertOnChatGPT throws on localhost).
+- `Store.load()` already calls `mergeState()` internally; do not double-call `mergeState()` on the result.
+
+---
+
+## 2026-03-09 - US-001
+
+- Created `js-exporter/` project scaffolding: `package.json`, `tsconfig.json`, `vitest.config.ts`
+- Created directory structure under `src/` and `tests/` with `.gitkeep` files
+- Created `src/index.ts` placeholder for TypeScript to compile
+- Updated root `.gitignore`: made `package.json`/`package-lock.json` root-only patterns, added `js-exporter/dist/`
+- Files changed: `.gitignore`, `js-exporter/package.json`, `js-exporter/tsconfig.json`, `js-exporter/vitest.config.ts`, `js-exporter/src/index.ts`, `.gitkeep` files in all src/tests subdirectories
+- **Learnings for future iterations:**
+
+  - `vitest run` exits with code 1 when no test files found; `passWithNoTests: true` in vitest config fixes this.
+  - `tsc --noEmit` requires at least one `.ts` input file; an empty barrel `export {};` is sufficient.
+  - Root `.gitignore` already ignores `node_modules/` globally and `dist/` globally; `js-exporter/dist/` was added explicitly for clarity but is already covered.
+
+---
+
+## 2026-03-09 - US-002
+
+- Created `js-exporter/src/types.ts` with all shared interfaces extracted from `js/script.js` monolith
+- Created `js-exporter/tests/types.test.ts` verifying all type shapes compile and match the monolith's structures
+- Types extracted: `ExportState`, `Settings`, `Progress`, `ScanState`, `RunState`, `Stats`, `Changes`, `PendingItem`, `DeadItem`, `KfPendingItem`, `KfDeadItem`, `ProjectInfo`, `ProjectFile`, `FileRef`, `Task`, `TaskStatus`
+- Files changed: `js-exporter/src/types.ts`, `js-exporter/tests/types.test.ts`
+- **Learnings for future iterations:**
+
+  No significant learnings.
+
+---
+
+## 2026-03-09 - US-003
+
+- Ported utility functions from `js/script.js` lines 5-42, 35, 66-67 into three TypeScript modules
+- Created `js-exporter/src/utils/format.ts` (now, clamp, safeJsonParse, fmtMs, fmtTs)
+- Created `js-exporter/src/utils/sanitize.ts` (sanitizeName)
+- Created `js-exporter/src/utils/binary.ts` (enc, u16, u32)
+- Created corresponding test files with full coverage
+- Files changed: `js-exporter/src/utils/format.ts`, `js-exporter/src/utils/sanitize.ts`, `js-exporter/src/utils/binary.ts`, `js-exporter/tests/utils/format.test.ts`, `js-exporter/tests/utils/sanitize.test.ts`, `js-exporter/tests/utils/binary.test.ts`
+- **Learnings for future iterations:**
+
+  No significant learnings.
+
+---
+
+## 2026-03-09 - US-004
+
+- Ported CRC-32 and ZipLite from `js/script.js` lines 43-183 into TypeScript modules
+- Created `js-exporter/src/zip/crc32.ts` (crcTable, crc32)
+- Created `js-exporter/src/zip/zip-lite.ts` (ZipLite class, dosTimeDate helper)
+- Created `js-exporter/tests/zip/crc32.test.ts` (7 tests: table size, known CRC values)
+- Created `js-exporter/tests/zip/zip-lite.test.ts` (11 tests: ZIP signatures, CRC matching, multi-entry offsets, dosTimeDate encoding, UTF-8 flag, addBlob)
+- Files changed: `js-exporter/src/zip/crc32.ts`, `js-exporter/src/zip/zip-lite.ts`, `js-exporter/tests/zip/crc32.test.ts`, `js-exporter/tests/zip/zip-lite.test.ts`
+- **Learnings for future iterations:**
+
+  - `Uint8Array` spread into `Blob` constructor fails TS strict typecheck (`ArrayBufferLike` vs `ArrayBuffer`). Cast with `as BlobPart[]`.
+- `fake-indexeddb/auto` provides global `indexedDB` in Node. In jsdom environment, it's already available but fake-indexeddb replaces it.
+- Use `vi.resetModules()` + dynamic `import()` to get fresh module-level state (`_idb`, `_useLocalStorage`) between store tests — avoids cross-test contamination from module singletons.
+- `indexedDB.deleteDatabase()` in fake-indexeddb can hang/timeout. Prefer `vi.resetModules()` to reset module state instead.
+
+---
+
+## 2026-03-09 - US-005
+
+- Ported state management from `js/script.js` lines 184-397 into three TypeScript modules
+- Created `js-exporter/src/state/defaults.ts` (KEY, VER, defaultState, mergeState)
+- Created `js-exporter/src/state/store.ts` (initIdb, Store with load/save/reset, IndexedDB with localStorage fallback)
+- Created `js-exporter/src/state/debounce.ts` (createSaveDebounce factory)
+- Created `js-exporter/tests/state/defaults.test.ts` (28 tests)
+- Created `js-exporter/tests/state/store.test.ts` (10 tests, using fake-indexeddb + jsdom)
+- Created `js-exporter/tests/state/debounce.test.ts` (6 tests, using fake timers)
+- Files changed: `js-exporter/src/state/defaults.ts`, `js-exporter/src/state/store.ts`, `js-exporter/src/state/debounce.ts`, `js-exporter/tests/state/defaults.test.ts`, `js-exporter/tests/state/store.test.ts`, `js-exporter/tests/state/debounce.test.ts`
+- **Learnings for future iterations:**
+
+  - `fake-indexeddb/auto` polyfills `indexedDB` globally but `indexedDB.deleteDatabase()` can hang in test cleanup. Use `vi.resetModules()` with dynamic imports to isolate module-level singletons between tests instead.
+  - Store tests need `// @vitest-environment jsdom` for `localStorage` access.
+  - The `StoreLike` interface in `debounce.ts` decouples it from the concrete `Store` — makes testing trivial with a mock.
+
+---
+
+## 2026-03-09 - US-006
+
+- Ported network layer from `js/script.js` lines 412-532 into two TypeScript modules
+- Created `js-exporter/src/net/sleep.ts` (sleep with abort signal support)
+- Created `js-exporter/src/net/net.ts` (createNet factory returning Net object with getToken, _fetch, fetchJson, fetchBlob, download)
+- Created `js-exporter/tests/net/sleep.test.ts` (5 tests)
+- Created `js-exporter/tests/net/net.test.ts` (18 tests covering token caching, 429 retry with backoff, 401 re-auth, 502/503/504 retries, abort signal, fetchJson/fetchBlob, download)
+- Removed `.gitkeep` files from `src/net/` and `tests/net/`
+- Files changed: `js-exporter/src/net/sleep.ts`, `js-exporter/src/net/net.ts`, `js-exporter/tests/net/sleep.test.ts`, `js-exporter/tests/net/net.test.ts`
+- **Learnings for future iterations:**
+
+  - When testing async code that rejects during `vi.advanceTimersByTimeAsync()`, attach the error handler (`.catch()`) before advancing timers. Otherwise Vitest reports unhandled promise rejections. Use `.catch((e) => e)` to capture the error, then assert on the result.
+  - Net tests need `// @vitest-environment jsdom` for `document.createElement` and `URL.createObjectURL` in the `download` method.
+  - The `createNet` factory pattern injects `S`, `addLog`, `setStatus`, `saveDebounce` — consistent with the `createSaveDebounce` pattern from US-005.
+
+---
+
+## 2026-03-09 - US-007
+
+- Ported scan module from `js/script.js` lines 877-1080 into four TypeScript modules
+- Created `js-exporter/src/scan/file-refs.ts` (extractFileRefs)
+- Created `js-exporter/src/scan/changes.ts` (computeChanges)
+- Created `js-exporter/src/scan/conversations.ts` (scanConversations)
+- Created `js-exporter/src/scan/projects.ts` (scanProjects, scanProjectConversations)
+- Created `js-exporter/tests/scan/file-refs.test.ts` (12 tests)
+- Created `js-exporter/tests/scan/changes.test.ts` (9 tests)
+- Created `js-exporter/tests/scan/conversations.test.ts` (10 tests)
+- Created `js-exporter/tests/scan/projects.test.ts` (16 tests)
+- Removed `.gitkeep` files from `src/scan/` and `tests/scan/`
+- Files changed: `js-exporter/src/scan/file-refs.ts`, `js-exporter/src/scan/changes.ts`, `js-exporter/src/scan/conversations.ts`, `js-exporter/src/scan/projects.ts`, `js-exporter/tests/scan/file-refs.test.ts`, `js-exporter/tests/scan/changes.test.ts`, `js-exporter/tests/scan/conversations.test.ts`, `js-exporter/tests/scan/projects.test.ts`
+- **Learnings for future iterations:**
+
+  - `computeChanges` in the monolith reads `S.progress.pending` directly. In the TS version, pass `oldPending` as a parameter to avoid coupling to global state — consistent with FR-11 (dependency injection).
+  - Scan test pagination: when testing pagination, set `S.settings.batch` to match the number of items per mock page, otherwise the `got.length < pageSize` check exits the loop early.
+  - `scanProjectConversations` uses cursor-based pagination (not offset-based like `scanConversations`), starting with cursor `"0"`.
+
+---
+
+## 2026-03-09 - US-008
+
+- Ported TaskList from `js/script.js` lines 534-626 into a TypeScript factory module
+- Created `js-exporter/src/ui/task-list.ts` (createTaskList factory returning TaskList with add, update, getVisible, render)
+- Created `js-exporter/tests/ui/task-list.test.ts` (28 tests covering add, update, getVisible windowing, render HTML)
+- Removed `.gitkeep` files from `src/ui/` and `tests/ui/`
+- Files changed: `js-exporter/src/ui/task-list.ts`, `js-exporter/tests/ui/task-list.test.ts`
+- **Learnings for future iterations:**
+
+  - The monolith's `getVisible()` order is `failed, done, active, queued` (not what the PRD AC says). The monolith code is the source of truth per the PRD's own rules.
+  - When using `vi.mock()` with a module, place the mock before imports. Vitest hoists `vi.mock()` calls automatically, but the pattern is clearer when explicit.
+  - `Task` objects are mutated via `for..in` loop in `update()`. TypeScript strict mode rejects `(t as Record<string, unknown>)` cast — use `(t as unknown as Record<string, unknown>)` double cast instead.
+
+---
+
+## 2026-03-09 - US-009
+
+- Ported floating panel UI from `js/script.js` lines 627-869 into a TypeScript factory module
+- Created `js-exporter/src/ui/panel.ts` (createUI factory returning UI with inject, renderAll, renderLogs, renderProjects, setStatus, setBar, ensureTick)
+- Created `js-exporter/tests/ui/panel.test.ts` (16 tests covering inject, setStatus, setBar, renderLogs, renderAll)
+- Added `isUsingLocalStorage()` getter to `js-exporter/src/state/store.ts` to expose the `_useLocalStorage` flag for the panel's version info display
+- Files changed: `js-exporter/src/ui/panel.ts`, `js-exporter/tests/ui/panel.test.ts`, `js-exporter/src/state/store.ts`
+- **Learnings for future iterations:**
+
+  - jsdom normalizes CSS percentage values (e.g., `0.0%` becomes `0%`, `20.0%` becomes `20%`). Use `parseFloat()` on `style.width` to assert numeric values in tests instead of string matching.
+  - The panel's `onReset` callback is injected via deps to keep the panel decoupled from `Store`. `main.ts` wires the actual `Store.reset()` + `Store.load()` logic in US-011.
+  - The `ExporterRef` interface is defined in panel.ts for the `setExporter()` method — allows the panel to call `_exporter.start/stop/rescan` and check `_exporter.scanPromise` without a circular dependency.
+
+---
+
+## 2026-03-09 - US-010
+
+- Ported core export pipeline from `js/script.js` lines 1082-1668 into a TypeScript factory module
+- Created `js-exporter/src/export/exporter.ts` (createExporter factory returning Exporter with rescan, start, stop, exportOneBatch, exportKnowledgeBatch)
+- Created `js-exporter/tests/export/exporter.test.ts` (26 tests covering rescan, start/stop, batch export, KF export, abort signal, filtering, dead-lettering)
+- Removed `.gitkeep` files from `src/export/` and `tests/export/`
+- Files changed: `js-exporter/src/export/exporter.ts`, `js-exporter/tests/export/exporter.test.ts`
+- **Learnings for future iterations:**
+
+  - jsdom's `Blob` class may not have `arrayBuffer()` method. When testing code that calls `blob.arrayBuffer()` (like `ZipLite.addBlob`), polyfill it in tests with a `FileReader`-based fallback or use a helper like `makeBlob()`.
+  - The `createExporter` factory takes the most dependencies of any module: S, net, ui, taskList, addLog, saveDebounce, plus all scan functions, extractFileRefs, computeChanges, and assertOnChatGPT. The `ExporterDeps` interface documents all of these.
+  - The exporter's `rescan()` method returns from an `async` function, so even with scanPromise deduplication the returned promise is a new wrapper. Test deduplication by checking scan function call count, not promise identity.
+
+---
+
+## 2026-03-09 - US-011
+
+- Created `js-exporter/src/main.ts` - the composition root wiring all modules as an async IIFE
+- Created `js-exporter/tests/main.test.ts` (6 tests: assertOnChatGPT hostname checks, createAddLog timestamping, log cap, timestamp format)
+- Exports `assertOnChatGPT` and `createAddLog` for unit testing; the IIFE runs on module load
+- Wires: initIdb, Store.load, saveDebounce, addLog (with late-bound renderLogs), Net, TaskList, UI, Exporter
+- Exposes window globals: `__cvz_S`, `__cvz_Net`, `__cvz_Exporter`, `__cvz_UI`, `__cvz_TaskList` (matching monolith), plus `__cvz_state`, `__cvz_stop`, `__cvz_reset` (per FR-9)
+- Handles interrupted-run recovery and initial log messages
+- Files changed: `js-exporter/src/main.ts`, `js-exporter/tests/main.test.ts`
+- **Learnings for future iterations:**
+
+  - `main.ts` IIFE runs on import in tests, causing `assertOnChatGPT` to throw in jsdom (hostname "localhost"). Stub `alert` in test setup to suppress jsdom "not implemented" noise. The IIFE's catch block handles the error gracefully.
+  - `Store.load()` already calls `mergeState()` internally; do not call `mergeState()` again in `main.ts`.
+  - The monolith exposes `__cvz_S`, `__cvz_Net`, `__cvz_Exporter`, `__cvz_UI`, `__cvz_TaskList` (NOT `__cvz_state`/`__cvz_stop`/`__cvz_reset` as the PRD states in FR-9). Both sets are exposed in the TS version.
+  - Circular dependency between `addLog` and UI: resolved with a late-bound `_renderLogs` reference that starts as a no-op and gets wired after `createUI()`.
+
+---
+
+## 2026-03-09 - US-012
+
+- Created `js-exporter/tests/build.test.ts` (11 tests) verifying esbuild produces valid IIFE bookmarklet output
+- Tests verify: build/build:dev succeed, bookmarklet.js prefix, syntax validity, IIFE wrapping, no module artifacts, bundle size within 20% of original
+- Build results: minified 39,593 bytes vs original 39,866 bytes (ratio 0.993)
+- Files changed: `js-exporter/tests/build.test.ts`
+- **Learnings for future iterations:**
+
+  - The esbuild `--format=iife` output wraps with `"use strict";(()=>{...})();` pattern. Regex checks for `require()`/`import`/`export` in the output will match string literals containing those words (e.g., "cvz-export", "file export"). Check for IIFE wrapping pattern instead.
+  - Build tests use `execSync("npm run build")` in `beforeAll` -- they run the actual esbuild pipeline, making them integration tests that take ~200-700ms.
+
+---
+Final commit: c5b881643674e6ffdc782ddd02243b4ecdff5ab9

@@ -1,6 +1,0 @@
-# PRD: Convert js/script.js to TypeScript App
-
-Base commit: 3ce73a3f8138f32c963e01607b262246676cd821
-
-## Codebase Patterns
-
