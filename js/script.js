@@ -189,7 +189,6 @@ javascript: (async () => {
         batch: 50,
         conc: 3,
         pause: 300,
-        autoRescan: true,
         filterGizmoId: null
       },
       progress: {
@@ -1255,7 +1254,7 @@ javascript: (async () => {
           await Net.getToken(ac.signal);
           const scanAge = S.scan.at ? (now() - S.scan.at) : Infinity;
           const hasPending = Array.isArray(S.progress.pending) && S.progress.pending.length;
-          const needsScan = !hasPending || (S.settings.autoRescan !== false && scanAge > 6 * 60 * 60 * 1000) || !!S.settings.filterGizmoId;
+          const needsScan = !hasPending || !!S.settings.filterGizmoId;
           if (needsScan && !this.scanPromise) {
             this.rescan(true);
           }
