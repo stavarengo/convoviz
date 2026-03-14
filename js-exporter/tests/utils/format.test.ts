@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { now, clamp, safeJsonParse, fmtMs, fmtTs } from "../../src/utils/format";
+import { now, clamp, safeJsonParse, fmtMs, fmtTs, fmtSize } from "../../src/utils/format";
 
 describe("now", () => {
   it("returns a number close to Date.now()", () => {
@@ -118,5 +118,34 @@ describe("fmtTs", () => {
     const ts = 1700000000000;
     const expected = new Date(ts).toLocaleString();
     expect(fmtTs(ts)).toBe(expected);
+  });
+});
+
+describe("fmtSize", () => {
+  it("returns '0 B' for zero", () => {
+    expect(fmtSize(0)).toBe("0 B");
+  });
+
+  it("formats bytes", () => {
+    expect(fmtSize(512)).toBe("512 B");
+  });
+
+  it("formats kilobytes", () => {
+    expect(fmtSize(1024)).toBe("1.0 KB");
+    expect(fmtSize(1536)).toBe("1.5 KB");
+  });
+
+  it("formats megabytes", () => {
+    expect(fmtSize(12.3 * 1024 * 1024)).toBe("12.3 MB");
+    expect(fmtSize(1024 * 1024)).toBe("1.0 MB");
+  });
+
+  it("formats gigabytes", () => {
+    expect(fmtSize(1.2 * 1024 * 1024 * 1024)).toBe("1.2 GB");
+  });
+
+  it("handles negative and NaN gracefully", () => {
+    expect(fmtSize(-1)).toBe("0 B");
+    expect(fmtSize(NaN)).toBe("0 B");
   });
 });

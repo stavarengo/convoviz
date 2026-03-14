@@ -1,7 +1,7 @@
 import type { ExportState } from "../types";
 
 export const KEY = "__cvz_export_state_v1__";
-export const VER = "cvz-bookmarklet-4.5";
+export const VER = "cvz-bookmarklet-5.0";
 
 export const defaultState = (): ExportState => ({
   v: 2,

@@ -3,7 +3,7 @@ import type { Net } from "../net/net";
 import type { TaskList } from "./task-list";
 import { VER } from "../state/defaults";
 import { isUsingLocalStorage } from "../state/store";
-import { clamp } from "../utils/format";
+import { clamp, fmtSize } from "../utils/format";
 import { scanProjects as defaultScanProjects } from "../scan/projects";
 
 interface ScanNet {
@@ -19,6 +19,8 @@ export interface UIDeps {
   net: Net;
   taskList: TaskList;
   saveDebounce: (immediate: boolean) => void;
+  getAccumulatedSize?: () => Promise<number>;
+  onDownload?: () => Promise<void>;
   onReset?: () => Promise<void>;
   scanProjects?: (
     net: ScanNet,
@@ -36,6 +38,7 @@ export interface UI {
   renderProjects(): void;
   setStatus(msg: string): void;
   setBar(pct: number): void;
+  updateDownloadButton(): Promise<void>;
 }
 
 export interface ExporterRef {
@@ -142,6 +145,26 @@ export const createUI = (deps: UIDeps): UI => {
     container: null,
     _exporter: null,
 
+    async updateDownloadButton(): Promise<void> {
+      const btn = ui.container && (ui.container.querySelector("#cvz-download") as HTMLButtonElement | null);
+      const accEl = ui.container && (ui.container.querySelector("#cvz-accumulated") as HTMLElement | null);
+      if (!btn) return;
+      if (!deps.getAccumulatedSize) {
+        btn.style.display = "none";
+        if (accEl) accEl.textContent = "0 B";
+        return;
+      }
+      const size = await deps.getAccumulatedSize();
+      if (accEl) accEl.textContent = fmtSize(size);
+      if (size > 0) {
+        btn.style.display = "";
+        btn.textContent = "Download (" + fmtSize(size) + ")";
+        btn.disabled = !!S.run.isRunning;
+      } else {
+        btn.style.display = "none";
+      }
+    },
+
     setExporter(e: ExporterRef): void {
       _exporter = e;
     },
@@ -188,6 +211,8 @@ export const createUI = (deps: UIDeps): UI => {
         '<div><b>Projects:</b> <span id="cvz-projects">0</span></div>' +
         '<div>\u00b7</div>' +
         '<div><b>KF:</b> <span id="cvz-kf-count">0/0</span></div>' +
+        '<div>\u00b7</div>' +
+        '<div><b>Accumulated:</b> <span id="cvz-accumulated">0 B</span></div>' +
         "</div>" +
         "</div>" +
         '<div data-testid="cvz-controls" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
@@ -206,6 +231,7 @@ export const createUI = (deps: UIDeps): UI => {
         '<textarea id="cvz-log" readonly style="margin-top:10px;height:80px;width:100%;box-sizing:border-box;resize:vertical;font-size:11px;white-space:pre-wrap;background:rgba(0,0,0,0.25);color:#ececf1;border:1px solid rgba(255,255,255,0.08);padding:8px;border-radius:10px;font-family:inherit;outline:none;"></textarea>' +
         '<div style="margin-top:10px;display:flex;justify-content:space-between;gap:8px;">' +
         '<button id="cvz-reset" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Reset</button>' +
+        '<button id="cvz-download" data-testid="cvz-download" style="display:none;padding:6px 10px;border-radius:8px;border:1px solid rgba(16,163,127,0.6);background:rgba(16,163,127,0.15);color:#ececf1;cursor:pointer;font-size:11px;font-weight:600;">Download</button>' +
         '<button id="cvz-dlstate" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Export state</button>' +
         "</div>";
 
@@ -257,7 +283,16 @@ export const createUI = (deps: UIDeps): UI => {
       });
 
       d.querySelector("#cvz-reset")!.addEventListener("click", async () => {
-        if (deps.onReset) await deps.onReset();
+        if (!deps.onReset) return;
+        const ok = confirm(
+          "Reset all export state and accumulated export data? This cannot be undone.",
+        );
+        if (!ok) return;
+        await deps.onReset();
+      });
+
+      d.querySelector("#cvz-download")!.addEventListener("click", () => {
+        if (deps.onDownload) deps.onDownload();
       });
 
       d.querySelector("#cvz-dlstate")!.addEventListener("click", () => {
@@ -402,6 +437,7 @@ export const createUI = (deps: UIDeps): UI => {
       }
 
       ui.renderLogs();
+      ui.updateDownloadButton();
 
       const done = exported;
       const tot = S.scan.total ? S.scan.total : exported + pending;

@@ -7,8 +7,8 @@ describe("KEY and VER constants", () => {
     expect(KEY).toBe("__cvz_export_state_v1__");
   });
 
-  it("VER matches the monolith value", () => {
-    expect(VER).toBe("cvz-bookmarklet-4.5");
+  it("VER is the current version", () => {
+    expect(VER).toBe("cvz-bookmarklet-5.0");
   });
 });
 

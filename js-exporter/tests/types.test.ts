@@ -22,7 +22,7 @@ describe("types", () => {
   it("ExportState has the correct top-level shape", () => {
     const state: ExportState = {
       v: 2,
-      ver: "cvz-bookmarklet-4.5",
+      ver: "cvz-bookmarklet-5.0",
       projects: [],
       settings: { batch: 50, conc: 3, pause: 300, filterGizmoId: null },
       progress: {
@@ -50,7 +50,7 @@ describe("types", () => {
       logs: [],
     };
     expect(state.v).toBe(2);
-    expect(state.ver).toBe("cvz-bookmarklet-4.5");
+    expect(state.ver).toBe("cvz-bookmarklet-5.0");
   });
 
   it("Settings has all expected fields", () => {

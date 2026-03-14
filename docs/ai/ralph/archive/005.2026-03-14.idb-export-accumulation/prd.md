@@ -22,7 +22,7 @@ This feature replaces per-batch ZIP downloads with IndexedDB-based accumulation.
 
 ### US-001: IDB Export Database & Helper Module
 
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need a separate IDB database (`cvz-export-blobs`) with `conv` and `files` object stores, plus a helper module exposing cursor-based iteration, so that export data can be accumulated without affecting the existing state database.
 
 **Acceptance Criteria:**
@@ -38,7 +38,7 @@ This feature replaces per-batch ZIP downloads with IndexedDB-based accumulation.
 
 ### US-002: Modify Conversation Export to Accumulate in IDB
 
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want my exported conversations to accumulate in IDB instead of downloading a ZIP per batch, so that I get a single file at the end.
 
 **Acceptance Criteria:**
@@ -53,7 +53,7 @@ This feature replaces per-batch ZIP downloads with IndexedDB-based accumulation.
 
 ### US-003: Modify Knowledge File Export to Accumulate in IDB
 
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want knowledge files to also accumulate in IDB alongside conversations, so that the final ZIP contains everything.
 
 **Acceptance Criteria:**
@@ -67,7 +67,7 @@ This feature replaces per-batch ZIP downloads with IndexedDB-based accumulation.
 
 ### US-004: Streaming ZIP Writer
 
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need a streaming ZIP writer that writes entries directly to a `WritableStream`, so that final ZIP generation doesn't require holding the entire archive in memory.
 
 **Acceptance Criteria:**
@@ -82,7 +82,7 @@ This feature replaces per-batch ZIP downloads with IndexedDB-based accumulation.
 
 ### US-005: Final ZIP Generation via FSAA
 
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want to generate a single ZIP file from all accumulated IDB data, streamed directly to disk via the File System Access API, so that large exports don't run out of memory.
 
 **Acceptance Criteria:**
@@ -98,7 +98,7 @@ This feature replaces per-batch ZIP downloads with IndexedDB-based accumulation.
 
 ### US-006: Download Button & Accumulated Size Display
 
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want to see how much data has been accumulated and have a button to download the final ZIP at any time, so that I can monitor progress and trigger the download when ready.
 
 **Acceptance Criteria:**
@@ -112,7 +112,7 @@ This feature replaces per-batch ZIP downloads with IndexedDB-based accumulation.
 
 ### US-007: Status Line — Accumulated Counter
 
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want to see an "Accumulated" size counter in the status display, so that I can track how much data has been stored in IDB.
 
 **Acceptance Criteria:**
@@ -124,7 +124,7 @@ This feature replaces per-batch ZIP downloads with IndexedDB-based accumulation.
 
 ### US-008: Reset Clears Export IDB
 
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want the Reset action to also clear accumulated export data from IDB, so that I can start fresh.
 
 **Acceptance Criteria:**
@@ -136,7 +136,7 @@ This feature replaces per-batch ZIP downloads with IndexedDB-based accumulation.
 
 ### US-009: Page Reload Persistence & Resume
 
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want accumulated export data to persist across page reloads, so that I can resume or download after a browser restart.
 
 **Acceptance Criteria:**
@@ -148,7 +148,7 @@ This feature replaces per-batch ZIP downloads with IndexedDB-based accumulation.
 
 ### US-010: Version Bump & Migration
 
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need to bump the bookmarklet version and ensure clean migration from the old per-batch ZIP system.
 
 **Acceptance Criteria:**

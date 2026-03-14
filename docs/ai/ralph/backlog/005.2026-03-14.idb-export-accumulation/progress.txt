@@ -1,6 +1,0 @@
-# PRD: IDB-Based Export Accumulation & Single Final Zip
-
-Base commit: 2832de8ca1df55b73a6a34919125da19d92a2e3f
-
-## Codebase Patterns
-

@@ -28,7 +28,9 @@ const makeDeps = (stateOverrides?: Partial<ExportState>) => {
   };
   const saveDebounce = vi.fn();
   const scanProjects = vi.fn().mockResolvedValue([]);
-  return { S, addLog, net, taskList, saveDebounce, scanProjects };
+  const getAccumulatedSize = vi.fn().mockResolvedValue(0);
+  const onDownload = vi.fn().mockResolvedValue(undefined);
+  return { S, addLog, net, taskList, saveDebounce, scanProjects, getAccumulatedSize, onDownload };
 };
 
 describe("createUI", () => {
@@ -228,6 +230,179 @@ describe("createUI", () => {
       ui.inject();
       ui.renderAll();
       expect(deps.taskList.render).toHaveBeenCalled();
+    });
+
+    it("calls updateDownloadButton to refresh accumulated size", async () => {
+      const deps = makeDeps();
+      deps.getAccumulatedSize.mockResolvedValue(5 * 1024 * 1024);
+      const ui = createUI(deps);
+      ui.inject();
+      ui.renderAll();
+      // Wait for the async updateDownloadButton to complete
+      await vi.waitFor(() => {
+        expect(deps.getAccumulatedSize).toHaveBeenCalled();
+      });
+      const btn = document.getElementById("cvz-download")!;
+      expect(btn.style.display).not.toBe("none");
+      expect(btn.textContent).toContain("5.0 MB");
+    });
+  });
+
+  describe("accumulated counter", () => {
+    it("shows Accumulated label in the stats box", () => {
+      const deps = makeDeps();
+      const ui = createUI(deps);
+      ui.inject();
+      const statsBox = document.querySelector('[data-testid="cvz-stats"]')!;
+      expect(statsBox.textContent).toContain("Accumulated:");
+      expect(document.getElementById("cvz-accumulated")).not.toBeNull();
+    });
+
+    it("shows 0 B initially", () => {
+      const deps = makeDeps();
+      const ui = createUI(deps);
+      ui.inject();
+      const el = document.getElementById("cvz-accumulated")!;
+      expect(el.textContent).toBe("0 B");
+    });
+
+    it("updates to formatted size after renderAll", async () => {
+      const deps = makeDeps();
+      deps.getAccumulatedSize.mockResolvedValue(42.7 * 1024 * 1024);
+      const ui = createUI(deps);
+      ui.inject();
+      ui.renderAll();
+      await vi.waitFor(() => {
+        const el = document.getElementById("cvz-accumulated")!;
+        expect(el.textContent).toBe("42.7 MB");
+      });
+    });
+
+    it("updates to GB for large sizes", async () => {
+      const deps = makeDeps();
+      deps.getAccumulatedSize.mockResolvedValue(1.2 * 1024 * 1024 * 1024);
+      const ui = createUI(deps);
+      ui.inject();
+      ui.renderAll();
+      await vi.waitFor(() => {
+        const el = document.getElementById("cvz-accumulated")!;
+        expect(el.textContent).toBe("1.2 GB");
+      });
+    });
+
+    it("resets to 0 B when accumulated size returns 0", async () => {
+      const deps = makeDeps();
+      deps.getAccumulatedSize.mockResolvedValue(5 * 1024 * 1024);
+      const ui = createUI(deps);
+      ui.inject();
+      ui.renderAll();
+      await vi.waitFor(() => {
+        expect(document.getElementById("cvz-accumulated")!.textContent).toBe("5.0 MB");
+      });
+      deps.getAccumulatedSize.mockResolvedValue(0);
+      ui.renderAll();
+      await vi.waitFor(() => {
+        expect(document.getElementById("cvz-accumulated")!.textContent).toBe("0 B");
+      });
+    });
+  });
+
+  describe("download button", () => {
+    it("is hidden when accumulated size is 0", async () => {
+      const deps = makeDeps();
+      deps.getAccumulatedSize.mockResolvedValue(0);
+      const ui = createUI(deps);
+      ui.inject();
+      await ui.updateDownloadButton();
+      const btn = document.getElementById("cvz-download")!;
+      expect(btn.style.display).toBe("none");
+    });
+
+    it("is visible with formatted size when data is accumulated", async () => {
+      const deps = makeDeps();
+      deps.getAccumulatedSize.mockResolvedValue(12.3 * 1024 * 1024);
+      const ui = createUI(deps);
+      ui.inject();
+      await ui.updateDownloadButton();
+      const btn = document.getElementById("cvz-download")!;
+      expect(btn.style.display).not.toBe("none");
+      expect(btn.textContent).toContain("Download");
+      expect(btn.textContent).toContain("12.3 MB");
+    });
+
+    it("calls onDownload when clicked", async () => {
+      const deps = makeDeps();
+      deps.getAccumulatedSize.mockResolvedValue(5 * 1024 * 1024);
+      const ui = createUI(deps);
+      ui.inject();
+      await ui.updateDownloadButton();
+      const btn = document.getElementById("cvz-download")!;
+      btn.click();
+      expect(deps.onDownload).toHaveBeenCalled();
+    });
+
+    it("is disabled when export is running", async () => {
+      const deps = makeDeps();
+      deps.getAccumulatedSize.mockResolvedValue(5 * 1024 * 1024);
+      deps.S.run.isRunning = true;
+      const ui = createUI(deps);
+      ui.inject();
+      await ui.updateDownloadButton();
+      const btn = document.getElementById("cvz-download") as HTMLButtonElement;
+      expect(btn.disabled).toBe(true);
+    });
+
+    it("is enabled when export is not running", async () => {
+      const deps = makeDeps();
+      deps.getAccumulatedSize.mockResolvedValue(5 * 1024 * 1024);
+      deps.S.run.isRunning = false;
+      const ui = createUI(deps);
+      ui.inject();
+      await ui.updateDownloadButton();
+      const btn = document.getElementById("cvz-download") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+  });
+
+  describe("reset button", () => {
+    it("shows a confirmation dialog mentioning accumulated export data", () => {
+      const deps = makeDeps();
+      const onReset = vi.fn().mockResolvedValue(undefined);
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+      const ui = createUI({ ...deps, onReset });
+      ui.inject();
+      const btn = document.getElementById("cvz-reset")!;
+      btn.click();
+      expect(confirmSpy).toHaveBeenCalledTimes(1);
+      const msg = confirmSpy.mock.calls[0][0] as string;
+      expect(msg).toMatch(/accumulated export data/i);
+      confirmSpy.mockRestore();
+    });
+
+    it("does not call onReset when user cancels the dialog", () => {
+      const deps = makeDeps();
+      const onReset = vi.fn().mockResolvedValue(undefined);
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+      const ui = createUI({ ...deps, onReset });
+      ui.inject();
+      const btn = document.getElementById("cvz-reset")!;
+      btn.click();
+      expect(onReset).not.toHaveBeenCalled();
+      confirmSpy.mockRestore();
+    });
+
+    it("calls onReset when user confirms the dialog", async () => {
+      const deps = makeDeps();
+      const onReset = vi.fn().mockResolvedValue(undefined);
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+      const ui = createUI({ ...deps, onReset });
+      ui.inject();
+      const btn = document.getElementById("cvz-reset")!;
+      btn.click();
+      await vi.waitFor(() => {
+        expect(onReset).toHaveBeenCalledTimes(1);
+      });
+      confirmSpy.mockRestore();
     });
   });
 });

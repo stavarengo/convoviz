@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { crcTable, crc32 } from "../../src/zip/crc32";
+import { crcTable, crc32, crc32Update, crc32Final } from "../../src/zip/crc32";
 
 describe("crcTable", () => {
   it("has exactly 256 entries", () => {
@@ -39,5 +39,36 @@ describe("crc32", () => {
     const input = new TextEncoder().encode("test");
     // Known CRC-32 of "test" is 0xD87F7E0C
     expect(crc32(input)).toBe(0xd87f7e0c);
+  });
+});
+
+describe("crc32Update / crc32Final (incremental)", () => {
+  it("produces the same result as crc32 for a single chunk", () => {
+    const input = new TextEncoder().encode("hello");
+    const running = crc32Update(0xffffffff, input);
+    expect(crc32Final(running)).toBe(crc32(input));
+  });
+
+  it("produces the same result as crc32 when splitting into multiple chunks", () => {
+    const full = new TextEncoder().encode("hello world test data");
+    const chunk1 = full.slice(0, 5);
+    const chunk2 = full.slice(5, 11);
+    const chunk3 = full.slice(11);
+
+    let running = 0xffffffff;
+    running = crc32Update(running, chunk1);
+    running = crc32Update(running, chunk2);
+    running = crc32Update(running, chunk3);
+
+    expect(crc32Final(running)).toBe(crc32(full));
+  });
+
+  it("handles empty chunks correctly", () => {
+    const input = new TextEncoder().encode("test");
+    let running = 0xffffffff;
+    running = crc32Update(running, new Uint8Array(0));
+    running = crc32Update(running, input);
+    running = crc32Update(running, new Uint8Array(0));
+    expect(crc32Final(running)).toBe(crc32(input));
   });
 });

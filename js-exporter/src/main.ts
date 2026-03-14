@@ -1,15 +1,18 @@
 import type { ExportState } from "./types";
 import { initIdb, Store } from "./state/store";
+import { initExportBlobsIdb, ExportBlobStore } from "./state/export-blobs";
 import { VER } from "./state/defaults";
 import { createSaveDebounce } from "./state/debounce";
 import { createNet } from "./net/net";
 import { createTaskList } from "./ui/task-list";
 import { createUI } from "./ui/panel";
 import { createExporter } from "./export/exporter";
+import { downloadFinalZip } from "./export/generate-final-zip";
 import { scanConversations } from "./scan/conversations";
 import { scanProjects, scanProjectConversations } from "./scan/projects";
 import { extractFileRefs } from "./scan/file-refs";
 import { computeChanges } from "./scan/changes";
+import { reconcileExportState } from "./state/reconcile";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -40,6 +43,7 @@ export const createAddLog = (
   try {
     assertOnChatGPT();
     await initIdb();
+    await initExportBlobsIdb();
     let S = await Store.load();
 
     const saveDebounce = createSaveDebounce(Store, S);
@@ -58,14 +62,24 @@ export const createAddLog = (
       saveDebounce,
     });
 
+    const triggerDownload = async (): Promise<void> => {
+      await downloadFinalZip({
+        exportBlobStore: ExportBlobStore,
+        setStatus: (msg: string) => ui.setStatus(msg),
+      });
+    };
+
     const ui = createUI({
       S,
       addLog,
       net,
       taskList,
       saveDebounce,
+      getAccumulatedSize: () => ExportBlobStore.totalSize(),
+      onDownload: triggerDownload,
       onReset: async () => {
         await Store.reset();
+        await ExportBlobStore.clear();
         S = await Store.load();
         addLog("State reset.");
         ui.renderAll();
@@ -75,11 +89,22 @@ export const createAddLog = (
     // Now wire the late-bound renderLogs reference
     _renderLogs = () => ui.renderLogs();
 
+    // Reconcile IDB export data with state after a potential page reload.
+    // Conversations written to IDB but not yet reflected in S.progress.exported
+    // (due to debounce not firing before reload) get added back.
+    await reconcileExportState({
+      S,
+      getAllConvKeys: () => ExportBlobStore.getAllConvKeys(),
+      saveDebounce,
+      addLog,
+    });
+
     const exporter = createExporter({
       S,
       net,
       ui,
       taskList,
+      exportBlobStore: ExportBlobStore,
       addLog,
       saveDebounce,
       scanConversations,
@@ -88,6 +113,7 @@ export const createAddLog = (
       extractFileRefs,
       computeChanges,
       assertOnChatGPT,
+      onExportComplete: triggerDownload,
     });
 
     // Wire exporter into UI (for start/stop/rescan buttons)
@@ -108,6 +134,7 @@ export const createAddLog = (
     (window as any).__cvz_stop = () => exporter.stop();
     (window as any).__cvz_reset = async () => {
       await Store.reset();
+      await ExportBlobStore.clear();
       S = await Store.load();
       addLog("State reset via __cvz_reset.");
       ui.renderAll();

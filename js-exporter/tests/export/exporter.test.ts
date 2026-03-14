@@ -49,6 +49,15 @@ const makeDeps = () => {
     getVisible: vi.fn().mockReturnValue([]),
     render: vi.fn(),
   };
+  const exportBlobStore = {
+    putConv: vi.fn().mockResolvedValue(undefined),
+    putFile: vi.fn().mockResolvedValue(undefined),
+    getAllConvKeys: vi.fn().mockResolvedValue([]),
+    iterateConvs: vi.fn().mockResolvedValue(undefined),
+    iterateFiles: vi.fn().mockResolvedValue(undefined),
+    totalSize: vi.fn().mockResolvedValue(0),
+    clear: vi.fn().mockResolvedValue(undefined),
+  };
   const scanConversations = vi
     .fn()
     .mockResolvedValue([]);
@@ -66,6 +75,7 @@ const makeDeps = () => {
     pendingDelta: 0,
   });
   const assertOnChatGPT = vi.fn();
+  const onExportComplete = vi.fn().mockResolvedValue(undefined);
 
   return {
     S,
@@ -74,12 +84,14 @@ const makeDeps = () => {
     net,
     ui,
     taskList,
+    exportBlobStore,
     scanConversations,
     scanProjectConversations,
     scanProjects,
     extractFileRefs,
     computeChanges,
     assertOnChatGPT,
+    onExportComplete,
   };
 };
 
@@ -344,42 +356,46 @@ describe("createExporter", () => {
   });
 
   describe("exportOneBatch()", () => {
-    it("exports pending items and builds a ZIP download", async () => {
+    it("accumulates conversations in IDB instead of downloading ZIP", async () => {
       const deps = makeDeps();
       deps.S.progress.pending = [
         { id: "c1", title: "Chat 1", update_time: 100, gizmo_id: null },
       ];
+      const convJson = { id: "c1", mapping: {} };
       deps.net.fetchJson.mockImplementation(async (url: string) => {
         if (url.includes("/backend-api/conversation/c1")) {
-          return { id: "c1", mapping: {} };
-        }
-        if (url.includes("/backend-api/files/download/")) {
-          return { download_url: "https://example.com/file.txt" };
+          return convJson;
         }
         return {};
       });
       deps.extractFileRefs.mockReturnValue([]);
+      deps.exportBlobStore.totalSize.mockResolvedValue(1234);
       const ac = new AbortController();
       const exporter = createExporter(deps);
 
       await exporter.exportOneBatch(ac.signal);
 
-      // Should have downloaded a ZIP
-      expect(deps.net.download).toHaveBeenCalled();
-      const [blob, name] = deps.net.download.mock.calls[0];
-      expect(blob).toBeInstanceOf(Blob);
-      expect(name).toMatch(/^convoviz_export_.*\.zip$/);
+      // Should NOT have downloaded a ZIP
+      expect(deps.net.download).not.toHaveBeenCalled();
+      // Should have stored conversation in IDB
+      expect(deps.exportBlobStore.putConv).toHaveBeenCalledWith(
+        "c1",
+        JSON.stringify(convJson),
+      );
+      // Should have called totalSize to update UI
+      expect(deps.exportBlobStore.totalSize).toHaveBeenCalled();
       // Item should be exported
       expect(deps.S.progress.exported["c1"]).toBe(100);
       expect(deps.S.stats.batches).toBe(1);
       expect(deps.S.stats.chats).toBe(1);
     });
 
-    it("handles file refs within a conversation", async () => {
+    it("stores file assets in IDB with zip-relative paths", async () => {
       const deps = makeDeps();
       deps.S.progress.pending = [
         { id: "c1", title: "Chat 1", update_time: 100, gizmo_id: null },
       ];
+      const fileBlob = makeBlob("file content", "text/plain");
       deps.net.fetchJson.mockImplementation(async (url: string) => {
         if (url.includes("/backend-api/conversation/c1")) {
           return { id: "c1", mapping: {} };
@@ -389,7 +405,7 @@ describe("createExporter", () => {
         }
         return {};
       });
-      deps.net.fetchBlob.mockResolvedValue(makeBlob("file content", "text/plain"));
+      deps.net.fetchBlob.mockResolvedValue(fileBlob);
       deps.extractFileRefs.mockReturnValue([
         { id: "file1", name: "readme.txt" },
       ]);
@@ -404,7 +420,13 @@ describe("createExporter", () => {
         expect.objectContaining({ auth: true }),
       );
       expect(deps.net.fetchBlob).toHaveBeenCalled();
-      expect(deps.net.download).toHaveBeenCalled();
+      // Should NOT have downloaded a ZIP
+      expect(deps.net.download).not.toHaveBeenCalled();
+      // Asset should be stored in IDB with zip-relative path
+      expect(deps.exportBlobStore.putFile).toHaveBeenCalledWith(
+        "file1_readme.txt",
+        fileBlob,
+      );
     });
 
     it("moves failed items to dead after 3 failures", async () => {
@@ -505,7 +527,7 @@ describe("createExporter", () => {
   });
 
   describe("exportKnowledgeBatch()", () => {
-    it("exports kfPending items and builds a ZIP download", async () => {
+    it("accumulates KF files in IDB instead of downloading ZIP", async () => {
       const deps = makeDeps();
       deps.S.progress.kfPending = [
         {
@@ -530,20 +552,33 @@ describe("createExporter", () => {
           raw: { some: "data" },
         },
       ];
+      const fileBlob = makeBlob("content");
       deps.net.fetchJson.mockResolvedValue({
         status: "success",
         download_url: "/files/f1.txt",
       });
-      deps.net.fetchBlob.mockResolvedValue(makeBlob("content"));
+      deps.net.fetchBlob.mockResolvedValue(fileBlob);
+      deps.exportBlobStore.totalSize.mockResolvedValue(5000);
       const ac = new AbortController();
       const exporter = createExporter(deps);
 
       await exporter.exportKnowledgeBatch(ac.signal);
 
-      expect(deps.net.download).toHaveBeenCalled();
-      const [blob, name] = deps.net.download.mock.calls[0];
-      expect(blob).toBeInstanceOf(Blob);
-      expect(name).toMatch(/^convoviz_knowledge_.*\.zip$/);
+      // Should NOT have downloaded a ZIP
+      expect(deps.net.download).not.toHaveBeenCalled();
+      // KF binary file should be stored in IDB under kf/<projectName>/<filename>
+      expect(deps.exportBlobStore.putFile).toHaveBeenCalledWith(
+        "kf/Project 1/doc.txt",
+        fileBlob,
+      );
+      // Project metadata should be stored in IDB
+      expect(deps.exportBlobStore.putFile).toHaveBeenCalledWith(
+        "kf/Project 1/project.json",
+        expect.any(Blob),
+      );
+      // Should have called totalSize to update UI
+      expect(deps.exportBlobStore.totalSize).toHaveBeenCalled();
+      // kfExported and stats should still be updated
       expect(deps.S.progress.kfExported.length).toBe(1);
       expect(deps.S.stats.kfBatches).toBe(1);
       expect(deps.S.stats.kfFiles).toBe(1);
@@ -627,6 +662,53 @@ describe("createExporter", () => {
 
       expect(deps.net.fetchJson).not.toHaveBeenCalled();
       expect(deps.net.download).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("auto-trigger download on export completion", () => {
+    it("calls onExportComplete when all pending conversations are exported", async () => {
+      const deps = makeDeps();
+      deps.S.progress.pending = [
+        { id: "c1", title: "Chat 1", update_time: 100, gizmo_id: null },
+      ];
+      deps.net.fetchJson.mockImplementation(async (url: string) => {
+        if (url.includes("/backend-api/conversation/c1")) {
+          return { id: "c1", mapping: {} };
+        }
+        return {};
+      });
+      deps.extractFileRefs.mockReturnValue([]);
+      deps.exportBlobStore.totalSize.mockResolvedValue(1000);
+      const exporter = createExporter(deps);
+
+      await exporter.start();
+
+      expect(deps.onExportComplete).toHaveBeenCalled();
+    });
+
+    it("does not call onExportComplete when export is stopped", async () => {
+      const deps = makeDeps();
+      deps.S.progress.pending = [
+        { id: "c1", title: "Chat 1", update_time: 100, gizmo_id: null },
+      ];
+      deps.net.fetchJson.mockImplementation(async (url: string) => {
+        if (url.includes("/backend-api/conversation/c1")) {
+          // Simulate a stop during processing
+          return { id: "c1", mapping: {} };
+        }
+        return {};
+      });
+      deps.extractFileRefs.mockReturnValue([]);
+      const exporter = createExporter(deps);
+
+      // Mark as stopped before start finishes
+      const startP = exporter.start();
+      // The exporter will process the batch, then check stopRequested
+      // Simulate stop by calling stop right away
+      exporter.stop();
+      await startP;
+
+      expect(deps.onExportComplete).not.toHaveBeenCalled();
     });
   });
 

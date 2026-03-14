@@ -15,3 +15,14 @@ export const crc32 = (u8: Uint8Array): number => {
     c = crcTable[(c ^ u8[i]) & 255] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 };
+
+/** Update a running CRC-32 with a new chunk. Pass 0xffffffff as the initial value. */
+export const crc32Update = (crc: number, u8: Uint8Array): number => {
+  let c = crc;
+  for (let i = 0; i < u8.length; i++)
+    c = crcTable[(c ^ u8[i]) & 255] ^ (c >>> 8);
+  return c;
+};
+
+/** Finalize a running CRC-32 value. */
+export const crc32Final = (crc: number): number => (crc ^ 0xffffffff) >>> 0;

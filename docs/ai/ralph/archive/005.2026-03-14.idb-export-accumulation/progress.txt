@@ -1,0 +1,179 @@
+# PRD: IDB-Based Export Accumulation & Single Final Zip
+
+Base commit: 2832de8ca1df55b73a6a34919125da19d92a2e3f
+Final commit: a0cf7ddc7bcd908cceebb757029a40a23b166c26
+
+## Codebase Patterns
+
+Squash from: f762ac3f7225cd365a2efbeef0bef1b2ba727974
+- js-exporter tests use `// @vitest-environment jsdom` + `import "fake-indexeddb/auto"` for IDB tests
+- `vi.resetModules()` in `beforeEach` resets module cache but NOT the fake-indexeddb data; must clear IDB stores explicitly between tests
+- fake-indexeddb does not preserve `Blob` type through structured clone in jsdom; values come back as plain objects. Use `value instanceof Blob ? value.size : new Blob([value]).size` for defensive size calculation
+- IDB helper modules follow the pattern: module-level `_db` variable, `init*()` export to open DB, all methods are no-ops when `_db` is null
+- Each IDB operation opens a short-lived transaction (never held across async boundaries)
+- `npm install` is required in the js-exporter worktree before running tests
+- `ExportBlobStore` is injected into `createExporter` via the `exportBlobStore` dep in `ExporterDeps`, not imported directly -- enables clean test mocking
+- `ExportBlobStoreApi` interface is exported from `exporter.ts` for typing the dep
+- `StreamingZip` uses data descriptors (bit 3) for Blob entries to avoid buffering; Uint8Array entries write CRC/size directly in the local header
+- `crc32Update` / `crc32Final` in `crc32.ts` enable incremental CRC computation for streaming
+- `dosTimeDate` is exported from `zip-lite.ts` and reused in `streaming-zip.ts`
+- `generateFinalZip` takes a `getWritableStream` callback for testability; `downloadFinalZip` wraps it with FSAA (`showSaveFilePicker`)
+- `FinalZipBlobStore` interface in `generate-final-zip.ts` requires `iterateConvs` and `iterateFiles` -- separate from `ExportBlobStoreApi` (which only has put/totalSize)
+- UI optional deps (`getAccumulatedSize`, `onDownload`, `onReset`) use `?:` in `UIDeps` so tests can omit them; handlers check existence before calling
+- `onExportComplete` in `ExporterDeps` is optional (`?:`) and only called when export finishes naturally (not stopped by user)
+
+## 2026-03-14 - US-001
+
+- Implemented `ExportBlobStore` helper module at `js-exporter/src/state/export-blobs.ts`
+- New IDB database `cvz-export-blobs` with `conv` and `files` object stores
+- Exports: `initExportBlobsIdb()`, `ExportBlobStore` with `putConv`, `putFile`, `getAllConvKeys`, `iterateConvs`, `iterateFiles`, `totalSize`, `clear`
+- All iteration uses IDB cursors (not `getAll()`)
+- Integrated `initExportBlobsIdb()` call in `main.ts` alongside existing `initIdb()`
+- Files changed: `js-exporter/src/state/export-blobs.ts` (new), `js-exporter/src/main.ts` (modified), `js-exporter/tests/state/export-blobs.test.ts` (new, 13 tests)
+- **Learnings for future iterations:**
+
+  - fake-indexeddb in jsdom does not round-trip Blob objects; they come back as `{}`. Tests should not assert `instanceof Blob` on values read back from fake-indexeddb's files store. This is a test env limitation only -- real browsers handle it correctly.
+  - When multiple tests share the same fake-indexeddb database name, data persists across tests even with `vi.resetModules()`. Use `clear()` in `beforeEach` to isolate.
+
+---
+
+## 2026-03-14 - US-002
+
+- Modified `exportOneBatch()` in `js-exporter/src/export/exporter.ts` to accumulate in IDB instead of building per-batch ZIPs
+- Removed ZipLite instance creation and `net.download()` call from `exportOneBatch()`
+- Added `ExportBlobStoreApi` interface and `exportBlobStore` to `ExporterDeps` for dependency injection
+- Each conversation JSON is stored via `exportBlobStore.putConv(id, jsonString)` after successful fetch
+- Each asset blob is stored via `exportBlobStore.putFile(zipPath, blob)` with zip-relative path as key
+- After each batch completes, `exportBlobStore.totalSize()` is called for UI update
+- Wired `ExportBlobStore` into `createExporter()` call in `main.ts`
+- Updated existing exporter tests to verify IDB accumulation behavior instead of ZIP download
+- Dead-letter queue, fail counts, requeue logic, and `S.progress.exported` tracking remain unchanged
+- Files changed: `js-exporter/src/export/exporter.ts` (modified), `js-exporter/src/main.ts` (modified), `js-exporter/tests/export/exporter.test.ts` (modified)
+- **Learnings for future iterations:**
+
+  - `ExportBlobStore` is injected as a dep (not imported directly) in `createExporter` -- this makes test mocking straightforward without `vi.mock()`
+  - `ZipLite` and `enc` imports are still needed in `exporter.ts` because `exportKnowledgeBatch()` still uses them (will be changed in US-003)
+
+---
+
+## 2026-03-14 - US-003
+
+- Modified `exportKnowledgeBatch()` in `js-exporter/src/export/exporter.ts` to accumulate in IDB instead of building per-batch ZIPs
+- Removed ZipLite instance creation, `net.download()` call, and convoviz_export_meta.json generation from `exportKnowledgeBatch()`
+- KF binary files stored via `exportBlobStore.putFile('kf/<projectName>/<filename>', blob)` with sanitized names
+- Project metadata stored via `exportBlobStore.putFile('kf/<projectName>/project.json', blob)` as a JSON Blob
+- After each KF batch completes, `exportBlobStore.totalSize()` is called for UI update
+- Removed unused imports: `ZipLite`, `enc`, `VER` from `exporter.ts`
+- Updated test to verify IDB accumulation instead of ZIP download
+- Dead-letter queue, fail counts, requeue logic, and `S.progress.kfExported` tracking remain unchanged
+- Files changed: `js-exporter/src/export/exporter.ts` (modified), `js-exporter/tests/export/exporter.test.ts` (modified)
+- **Learnings for future iterations:**
+
+  - After US-003, `ZipLite`, `enc`, and `VER` are no longer used in `exporter.ts`. `ZipLite` may still be needed elsewhere (e.g., StreamingZip in US-004 may reference it), so the class itself is not deleted.
+  - `sanitizeName` replaces `/ \ ? % * : | " < >` with `_` but preserves spaces. IDB keys like `kf/Project 1/doc.txt` contain spaces, which is fine since they're IDB keys not filesystem paths.
+
+---
+
+## 2026-03-14 - US-004
+
+- Implemented `StreamingZip` class at `js-exporter/src/zip/streaming-zip.ts`
+- API: `constructor(writable: WritableStream)`, `addEntry(path, data: Uint8Array | Blob)`, `finalize()`
+- Uses STORE method (no compression), matching `ZipLite`
+- For `Blob` data: uses data descriptors (bit 3 of general purpose flags) to enable true streaming -- writes local header with zero CRC/sizes, streams blob chunks via `blob.stream().getReader()` computing CRC incrementally, then writes data descriptor with actual CRC/sizes
+- For `Uint8Array` data: computes CRC directly and writes CRC/sizes in the local header (no data descriptor)
+- Central directory entries (~100 bytes each) are the only state accumulated in memory
+- Added `crc32Update()` and `crc32Final()` to `js-exporter/src/zip/crc32.ts` for incremental CRC-32 computation
+- Files changed: `js-exporter/src/zip/streaming-zip.ts` (new), `js-exporter/src/zip/crc32.ts` (modified), `js-exporter/tests/zip/streaming-zip.test.ts` (new, 11 tests), `js-exporter/tests/zip/crc32.test.ts` (modified, +3 tests)
+- **Learnings for future iterations:**
+
+  - ZIP data descriptors (bit 3) allow writing file data before knowing CRC/size, which is required for true streaming of Blob content. The descriptor follows the file data with signature `0x08074b50` + crc32 + compressed size + uncompressed size (16 bytes total).
+  - `WritableStream` in test environments works well via `new WritableStream({ write(chunk) {...} })` to collect output for verification.
+
+---
+
+## 2026-03-14 - US-005
+
+- Implemented `generateFinalZip()` and `downloadFinalZip()` in `js-exporter/src/export/generate-final-zip.ts`
+- `generateFinalZip` accepts `getWritableStream` callback for testability; iterates conv store to build `conversations-NNN.json` files (100 per file, 1-indexed, 3-digit zero-padded), then iterates files store writing each entry with its IDB key as the zip path
+- `downloadFinalZip` wraps `generateFinalZip` with File System Access API: calls `showSaveFilePicker()` with suggested name `chatgpt-export.zip`, handles AbortError (user cancel) and missing API (non-Chromium) with status messages
+- Uses `StreamingZip` for memory-efficient ZIP writing; `finalize()` writes central directory and closes the stream
+- ZIP structure matches convoviz's `_SPLIT_FILE_RE` pattern and loader expectations
+- Files changed: `js-exporter/src/export/generate-final-zip.ts` (new), `js-exporter/tests/export/generate-final-zip.test.ts` (new, 12 tests)
+- **Learnings for future iterations:**
+
+  - `generateFinalZip` collects all conversation JSON strings in memory via `iterateConvs` callback before writing batches. This is necessary because IDB cursor callbacks are synchronous (can't await zip writes inside them). For very large exports (10k+ convs), this could use significant memory. A chunked cursor approach would require multiple IDB transactions.
+  - `showSaveFilePicker` throws `AbortError` when the user cancels -- this is different from the API not being available (which is a `TypeError` for calling undefined as function).
+
+---
+
+## 2026-03-14 - US-006
+
+- Added `fmtSize()` utility to `js-exporter/src/utils/format.ts` for human-readable byte formatting (B, KB, MB, GB, TB)
+- Added "Download" button to UI panel in `js-exporter/src/ui/panel.ts`, positioned between Reset and Export state buttons
+- Button is hidden when `IDB.totalSize() === 0`, visible with formatted size label when data is accumulated (e.g., "Download (12.3 MB)")
+- Button is disabled during active export (`S.run.isRunning`) to prevent concurrent IDB reads
+- Added `updateDownloadButton()` async method to `UI` interface, called from `renderAll()` to refresh size after each batch
+- Added `getAccumulatedSize` and `onDownload` optional deps to `UIDeps` interface
+- Added `onExportComplete` optional callback to `ExporterDeps`, called when all pending conversations and KF items are exported (no items remaining, not stopped by user)
+- Wired `downloadFinalZip` as both `onDownload` (button click) and `onExportComplete` (auto-trigger) in `main.ts`
+- Files changed: `js-exporter/src/utils/format.ts` (modified), `js-exporter/src/ui/panel.ts` (modified), `js-exporter/src/export/exporter.ts` (modified), `js-exporter/src/main.ts` (modified), `js-exporter/tests/utils/format.test.ts` (modified, +6 tests), `js-exporter/tests/ui/panel.test.ts` (modified, +6 tests), `js-exporter/tests/export/exporter.test.ts` (modified, +2 tests)
+- **Learnings for future iterations:**
+
+  - `updateDownloadButton()` is async (calls `getAccumulatedSize()` which queries IDB), but `renderAll()` is sync. The call is fire-and-forget from `renderAll()`. Tests use `vi.waitFor()` to await the async resolution.
+  - The download button uses the same green-tinted styling as the Start button to make it visually prominent as a primary action.
+
+---
+
+## 2026-03-14 - US-007
+
+- Added "Accumulated: X MB" counter to the stats box in the UI panel, in the second row alongside Projects and KF counts
+- Counter element is `#cvz-accumulated` span, initialized to "0 B"
+- Counter updates via the existing `updateDownloadButton()` async method (which already queries `getAccumulatedSize()`), avoiding a duplicate IDB call
+- Uses `fmtSize()` from `format.ts` for human-readable formatting (B, KB, MB, GB, TB)
+- Files changed: `js-exporter/src/ui/panel.ts` (modified), `js-exporter/tests/ui/panel.test.ts` (modified, +5 tests)
+- **Learnings for future iterations:**
+
+  - No significant learnings. The `updateDownloadButton` method was the natural place to update the accumulated counter since it already queries the same `getAccumulatedSize()` dep -- no new async flow needed.
+
+---
+
+## 2026-03-14 - US-008
+
+- Added confirmation dialog to Reset button in `js-exporter/src/ui/panel.ts` with message mentioning accumulated export data
+- Added `ExportBlobStore.clear()` call to `onReset` handler in `js-exporter/src/main.ts` (both UI handler and `__cvz_reset` alias)
+- After reset + clear, `renderAll()` -> `updateDownloadButton()` naturally hides the download button and resets accumulated counter to "0 B" since `totalSize()` returns 0
+- Files changed: `js-exporter/src/ui/panel.ts` (modified), `js-exporter/src/main.ts` (modified), `js-exporter/tests/ui/panel.test.ts` (modified, +3 tests)
+- **Learnings for future iterations:**
+
+  - No significant learnings.
+
+---
+
+## 2026-03-14 - US-009
+
+- Added `reconcileExportState()` function at `js-exporter/src/state/reconcile.ts` to sync IDB export data with state after page reload
+- On startup, compares conv keys in `cvz-export-blobs` IDB with `S.progress.exported`; any keys in IDB but missing from state get added to `exported` and removed from `pending`
+- Uses `update_time` from the pending item if available, otherwise defaults to 0
+- Wired reconciliation into `main.ts` after UI creation but before exporter/initial render, so the startup log message shows correct counts
+- Download button already shows on reload because `renderAll()` -> `updateDownloadButton()` queries `getAccumulatedSize()` from IDB
+- IDB transactions are atomic by design, so no data corruption on interrupted writes (no code changes needed for this criterion)
+- Files changed: `js-exporter/src/state/reconcile.ts` (new), `js-exporter/src/main.ts` (modified), `js-exporter/tests/state/reconcile.test.ts` (new, 7 tests)
+- **Learnings for future iterations:**
+
+  - `reconcileExportState` is dependency-injected (takes `getAllConvKeys` as a callback), consistent with the project pattern of avoiding direct module imports for testability.
+
+---
+
+## 2026-03-14 - US-010
+
+- Bumped version string from `cvz-bookmarklet-4.5` to `cvz-bookmarklet-5.0` in `js-exporter/src/state/defaults.ts`
+- `cvz-export-blobs` IDB database starts empty on first load (no migration needed -- this is already the default behavior)
+- `S.progress.exported` continues to work as-is (map of `{convId: update_time}`)
+- `ZipLite` class kept in codebase: still used in test suite (`streaming-zip.test.ts` byte-identical comparison test), and `dosTimeDate` is imported by `streaming-zip.ts`
+- Updated test expectations in `defaults.test.ts` and `types.test.ts` to reflect new version
+- Files changed: `js-exporter/src/state/defaults.ts` (modified), `js-exporter/tests/state/defaults.test.ts` (modified), `js-exporter/tests/types.test.ts` (modified)
+- **Learnings for future iterations:**
+
+  - No significant learnings.
+
+---

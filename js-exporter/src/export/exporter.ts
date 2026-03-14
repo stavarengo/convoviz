@@ -11,11 +11,8 @@ import type {
 import type { Net } from "../net/net";
 import type { UI } from "../ui/panel";
 import type { TaskList } from "../ui/task-list";
-import { ZipLite } from "../zip/zip-lite";
-import { enc } from "../utils/binary";
 import { now, clamp, fmtMs } from "../utils/format";
 import { sanitizeName } from "../utils/sanitize";
-import { VER } from "../state/defaults";
 import { sleep } from "../net/sleep";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -28,11 +25,18 @@ interface ScanNet {
   ): Promise<unknown>;
 }
 
+export interface ExportBlobStoreApi {
+  putConv(id: string, json: string): Promise<void>;
+  putFile(path: string, blob: Blob): Promise<void>;
+  totalSize(): Promise<number>;
+}
+
 export interface ExporterDeps {
   S: ExportState;
   net: Net;
   ui: UI & { ensureTick?: () => void };
   taskList: TaskList;
+  exportBlobStore: ExportBlobStoreApi;
   addLog: (msg: string) => void;
   saveDebounce: (immediate: boolean) => void;
   scanConversations: (
@@ -65,6 +69,7 @@ export interface ExporterDeps {
     oldPending: PendingItem[],
   ) => Changes;
   assertOnChatGPT: () => void;
+  onExportComplete?: () => Promise<void>;
 }
 
 export interface Exporter {
@@ -85,6 +90,7 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
     net,
     ui,
     taskList,
+    exportBlobStore,
     addLog,
     saveDebounce,
     scanConversations,
@@ -499,6 +505,9 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
           anyPending ? "Paused." : "\u2705 All done.",
         );
         addLog(anyPending ? "Paused." : "All done.");
+        if (!anyPending && !exporter.stopRequested && deps.onExportComplete) {
+          await deps.onExportComplete();
+        }
       } catch (e: any) {
         if (e && e.name === "AbortError") {
           ui.setStatus("Paused.");
@@ -565,7 +574,6 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
       const batchItems = eligible.slice(0, batchSize);
       if (!batchItems.length) return;
 
-      const zip = new ZipLite();
       const successes: any[] = [];
       const successIds = new Set<string>();
       const exportedMap = S.progress.exported || {};
@@ -666,7 +674,7 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
                     : f.id +
                       "." +
                       sanitizeName(ext);
-                  await zip.addBlob(fname, blob);
+                  await exportBlobStore.putFile(fname, blob);
                   filesSaved++;
                 } else {
                   filesFailed++;
@@ -692,6 +700,10 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
               if (pause)
                 await sleep(pause, signal).catch(() => {});
             }
+            await exportBlobStore.putConv(
+              item.id,
+              JSON.stringify(detail),
+            );
             successes.push(detail);
             successIds.add(item.id);
             exportedMap[item.id] = item.update_time || 0;
@@ -783,52 +795,6 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
       };
 
       if (successes.length) {
-        ui.setStatus(
-          "Building ZIP (" +
-            successes.length +
-            " chats)\u2026",
-        );
-        const meta = {
-          created_at: new Date().toISOString(),
-          tool: VER,
-          chats: successes.length,
-          files_saved: filesSaved,
-          files_failed: filesFailed,
-          batch_wall_ms: batchWall,
-          pending_before: S.progress.pending.length,
-          projects: (S.projects || []).map((p) => ({
-            gizmo_id: p.gizmoId,
-            name: p.name,
-            emoji: p.emoji,
-            theme: p.theme,
-            knowledge_file_count: (p.files || []).length,
-          })),
-        };
-        zip.addBytes(
-          "conversations.json",
-          enc(JSON.stringify(successes)),
-        );
-        zip.addBytes(
-          "convoviz_export_meta.json",
-          enc(JSON.stringify(meta, null, 2)),
-        );
-        const blob = zip.buildBlob();
-        const ts = new Date();
-        const pad = (n: number): string =>
-          String(n).padStart(2, "0");
-        const name =
-          "convoviz_export_" +
-          ts.getFullYear() +
-          pad(ts.getMonth() + 1) +
-          pad(ts.getDate()) +
-          "_" +
-          pad(ts.getHours()) +
-          pad(ts.getMinutes()) +
-          pad(ts.getSeconds()) +
-          "_n" +
-          successes.length +
-          ".zip";
-        net.download(blob, name);
         S.stats.batches = (S.stats.batches || 0) + 1;
         S.stats.batchMs =
           (S.stats.batchMs || 0) + batchWall;
@@ -880,6 +846,7 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
           if (exporter.abort) exporter.abort.abort();
         }
       }
+      await exportBlobStore.totalSize();
       ui.renderAll();
     },
 
@@ -910,7 +877,6 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
       const batchItems = kfEligible.slice(0, batchSize);
       if (!batchItems.length) return;
 
-      const zip = new ZipLite();
       const successes: KfPendingItem[] = [];
       const successIds = new Set<string>();
       const failInfo: Record<string, string> = {};
@@ -1001,14 +967,16 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
                     : "omit",
                 },
               );
-              const fname =
-                "projects/" +
-                item.projectId +
-                "/files/" +
-                item.fileId +
-                "_" +
-                sanitizeName(item.fileName);
-              await zip.addBlob(fname, blob);
+              const safeProjName = sanitizeName(
+                item.projectName,
+              );
+              const safeFname = sanitizeName(
+                item.fileName,
+              );
+              await exportBlobStore.putFile(
+                "kf/" + safeProjName + "/" + safeFname,
+                blob,
+              );
               successes.push(item);
               successIds.add(item.fileId);
               projectsInBatch.add(item.projectId);
@@ -1109,58 +1077,21 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
       };
 
       if (successes.length) {
-        ui.setStatus(
-          "Building KF ZIP (" +
-            successes.length +
-            " files)\u2026",
-        );
         for (const projId of projectsInBatch) {
           const proj = (S.projects || []).find(
             (p) => p.gizmoId === projId,
           );
           if (proj && proj.raw) {
-            zip.addBytes(
-              "projects/" + projId + "/project.json",
-              enc(JSON.stringify(proj.raw, null, 2)),
+            const safeProjName = sanitizeName(proj.name);
+            await exportBlobStore.putFile(
+              "kf/" + safeProjName + "/project.json",
+              new Blob(
+                [JSON.stringify(proj.raw, null, 2)],
+                { type: "application/json" },
+              ),
             );
           }
         }
-        const meta = {
-          created_at: new Date().toISOString(),
-          tool: VER,
-          type: "knowledge_files",
-          files_exported: successes.length,
-          batch_wall_ms: batchWall,
-          kf_pending_before: batchItems.length,
-          projects: (S.projects || []).map((p) => ({
-            gizmo_id: p.gizmoId,
-            name: p.name,
-            emoji: p.emoji,
-            theme: p.theme,
-            knowledge_file_count: (p.files || []).length,
-          })),
-        };
-        zip.addBytes(
-          "convoviz_export_meta.json",
-          enc(JSON.stringify(meta, null, 2)),
-        );
-        const blob = zip.buildBlob();
-        const ts = new Date();
-        const pad = (n: number): string =>
-          String(n).padStart(2, "0");
-        const name =
-          "convoviz_knowledge_" +
-          ts.getFullYear() +
-          pad(ts.getMonth() + 1) +
-          pad(ts.getDate()) +
-          "_" +
-          pad(ts.getHours()) +
-          pad(ts.getMinutes()) +
-          pad(ts.getSeconds()) +
-          "_n" +
-          successes.length +
-          ".zip";
-        net.download(blob, name);
         S.progress.kfExported = (
           S.progress.kfExported || []
         ).concat(successes);
@@ -1212,6 +1143,7 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
           if (exporter.abort) exporter.abort.abort();
         }
       }
+      await exportBlobStore.totalSize();
       ui.renderAll();
     },
   };

@@ -25,6 +25,18 @@ export const fmtMs = (ms: number): string => {
   return p.join(" ");
 };
 
+export const fmtSize = (bytes: number): string => {
+  if (!bytes || !isFinite(bytes) || bytes < 0) return "0 B";
+  if (bytes < 1024) return Math.round(bytes) + " B";
+  const units = ["KB", "MB", "GB", "TB"];
+  let val = bytes;
+  for (const u of units) {
+    val /= 1024;
+    if (val < 1024 || u === "TB") return val.toFixed(1) + " " + u;
+  }
+  return val.toFixed(1) + " TB";
+};
+
 export const fmtTs = (ts: number | string): string => {
   if (!ts) return "-";
   try {
