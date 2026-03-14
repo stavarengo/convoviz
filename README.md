@@ -1,3 +1,18 @@
+# Convoviz - ChatGPT Conversation Visualizer & Markdown Exporter
+
+How to build the JS Exporter bookmarklet from source: [See JS Exporter README](./js-exporter/README.md)
+
+
+
+
+
+--
+
+
+
+
+
+
 <p align="center">
   <h1 align="center">Convoviz</h1>
   <p align="center"><code>uv tool install "convoviz[viz]"</code></p>
