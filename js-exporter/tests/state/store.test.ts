@@ -1,0 +1,145 @@
+// @vitest-environment jsdom
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import "fake-indexeddb/auto";
+
+describe("Store with IndexedDB", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("initIdb opens IndexedDB successfully", async () => {
+    const { initIdb } = await import("../../src/state/store");
+    await initIdb();
+  });
+
+  it("load returns default state when nothing is saved", async () => {
+    const { initIdb, Store } = await import("../../src/state/store");
+    const { defaultState } = await import("../../src/state/defaults");
+    await initIdb();
+    const state = await Store.load();
+    expect(state).toEqual(defaultState());
+  });
+
+  it("save + load round-trips state correctly", async () => {
+    const { initIdb, Store } = await import("../../src/state/store");
+    const { defaultState } = await import("../../src/state/defaults");
+    await initIdb();
+    const state = {
+      ...defaultState(),
+      settings: {
+        batch: 100,
+        conc: 5,
+        pause: 500,
+        filterGizmoId: "g1" as string | null,
+      },
+      logs: ["log1", "log2"],
+    };
+    await Store.save(state);
+    const loaded = await Store.load();
+    expect(loaded.settings.batch).toBe(100);
+    expect(loaded.settings.conc).toBe(5);
+    expect(loaded.logs).toEqual(["log1", "log2"]);
+  });
+
+  it("reset clears saved state", async () => {
+    const { initIdb, Store } = await import("../../src/state/store");
+    const { defaultState } = await import("../../src/state/defaults");
+    await initIdb();
+    const state = { ...defaultState(), logs: ["saved-log"] };
+    await Store.save(state);
+    await Store.reset();
+    const loaded = await Store.load();
+    expect(loaded).toEqual(defaultState());
+  });
+
+  it("save overwrites previous state", async () => {
+    const { initIdb, Store } = await import("../../src/state/store");
+    const { defaultState } = await import("../../src/state/defaults");
+    await initIdb();
+    const state1 = { ...defaultState(), logs: ["first"] };
+    await Store.save(state1);
+    const state2 = { ...defaultState(), logs: ["second"] };
+    await Store.save(state2);
+    const loaded = await Store.load();
+    expect(loaded.logs).toEqual(["second"]);
+  });
+
+  it("load returns default state when initIdb was not called", async () => {
+    const { Store } = await import("../../src/state/store");
+    const { defaultState } = await import("../../src/state/defaults");
+    // Don't call initIdb — _idb is null
+    const state = await Store.load();
+    expect(state).toEqual(defaultState());
+  });
+
+  it("save is a no-op when initIdb was not called", async () => {
+    const { Store } = await import("../../src/state/store");
+    const { defaultState } = await import("../../src/state/defaults");
+    // Don't call initIdb — _idb is null
+    await Store.save(defaultState()); // should not throw
+  });
+
+  it("reset is a no-op when initIdb was not called", async () => {
+    const { Store } = await import("../../src/state/store");
+    // Don't call initIdb — _idb is null
+    await Store.reset(); // should not throw
+  });
+});
+
+describe("Store with localStorage fallback", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    localStorage.clear();
+  });
+
+  it("falls back to localStorage when IndexedDB is unavailable", async () => {
+    const origOpen = indexedDB.open.bind(indexedDB);
+    indexedDB.open = () => {
+      throw new Error("IndexedDB unavailable");
+    };
+    try {
+      const { initIdb, Store } = await import("../../src/state/store");
+      const { defaultState, KEY } = await import("../../src/state/defaults");
+      await initIdb();
+
+      const state = { ...defaultState(), logs: ["ls-test"] };
+      await Store.save(state);
+
+      const raw = localStorage.getItem(KEY);
+      expect(raw).toBeTruthy();
+      const parsed = JSON.parse(raw!);
+      expect(parsed.logs).toEqual(["ls-test"]);
+
+      const loaded = await Store.load();
+      expect(loaded.logs).toEqual(["ls-test"]);
+
+      await Store.reset();
+      expect(localStorage.getItem(KEY)).toBeNull();
+    } finally {
+      indexedDB.open = origOpen;
+    }
+  });
+
+  it("load from localStorage returns merged state", async () => {
+    const origOpen = indexedDB.open.bind(indexedDB);
+    indexedDB.open = () => {
+      throw new Error("IndexedDB unavailable");
+    };
+    try {
+      const { initIdb, Store } = await import("../../src/state/store");
+      const { defaultState, KEY } = await import("../../src/state/defaults");
+      await initIdb();
+
+      // Store partial state in localStorage
+      localStorage.setItem(
+        KEY,
+        JSON.stringify({ v: 2, ver: "old", settings: { batch: 77 } }),
+      );
+      const loaded = await Store.load();
+      expect(loaded.settings.batch).toBe(77);
+      expect(loaded.settings.conc).toBe(3); // merged from defaults
+    } finally {
+      indexedDB.open = origOpen;
+    }
+  });
+});

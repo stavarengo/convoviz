@@ -1,7 +1,7 @@
 # PRD: Convert js/script.js to TypeScript App
 
 **Project:** Convoviz
-**Branch:**
+**Branch:** ralph/004.2026-03-09.js-exporter-ts-conversion
 
 ## Introduction
 
@@ -22,7 +22,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 ## User Stories
 
 ### US-001: Project scaffolding
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want the TypeScript project skeleton set up so that subsequent stories can add modules incrementally.
 
 **Acceptance Criteria:**
@@ -41,7 +41,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 - [ ] Add `js-exporter/node_modules/` and `js-exporter/dist/` to the root `.gitignore`
 
 ### US-002: Shared type definitions
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want all shared interfaces and type aliases extracted into `types.ts` so that subsequent modules can import them.
 
 **Acceptance Criteria:**
@@ -63,7 +63,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 - [ ] No runtime code — only type definitions and interfaces
 
 ### US-003: Utility modules
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want the pure utility functions ported to TypeScript with tests so that other modules can depend on them.
 
 **Acceptance Criteria:**
@@ -87,7 +87,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 - [ ] `cd js-exporter && npm run typecheck` passes
 
 ### US-004: ZIP module
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want the CRC-32 and ZipLite classes ported to TypeScript with tests so that the export pipeline can build ZIP archives.
 
 **Acceptance Criteria:**
@@ -105,7 +105,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 - [ ] `cd js-exporter && npm run typecheck` passes
 
 ### US-005: State management module
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want state defaults, IndexedDB/localStorage persistence, and save debouncing ported to TypeScript with tests.
 
 **Acceptance Criteria:**
@@ -126,7 +126,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 - [ ] `cd js-exporter && npm run typecheck` passes
 
 ### US-006: Network layer module
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want the sleep utility and Net object ported to TypeScript with tests so that API calls can be made with retry/backoff.
 
 **Acceptance Criteria:**
@@ -150,7 +150,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 - [ ] `cd js-exporter && npm run typecheck` passes
 
 ### US-007: Scan module
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want the conversation/project scanning and file-ref extraction ported to TypeScript with tests.
 
 **Acceptance Criteria:**
@@ -179,7 +179,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 - [ ] `cd js-exporter && npm run typecheck` passes
 
 ### US-008: TaskList module
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want the in-memory task tracker ported to TypeScript with tests.
 
 **Acceptance Criteria:**
@@ -197,7 +197,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 - [ ] `cd js-exporter && npm run typecheck` passes
 
 ### US-009: UI Panel module
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want the floating panel UI ported to TypeScript with tests.
 
 **Acceptance Criteria:**
@@ -218,7 +218,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 - [ ] `cd js-exporter && npm run typecheck` passes
 
 ### US-010: Exporter module
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want the core export pipeline (rescan, start, stop, batch export) ported to TypeScript with tests.
 
 **Acceptance Criteria:**
@@ -239,7 +239,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 - [ ] `cd js-exporter && npm run typecheck` passes
 
 ### US-011: Entry point and wiring
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want `main.ts` to wire all modules together as the IIFE composition root, matching the monolith's initialization sequence.
 
 **Acceptance Criteria:**
@@ -259,7 +259,7 @@ This is a **strict 1:1 port** — no behavior changes, no refactoring of logic. 
 - [ ] All existing tests continue to pass
 
 ### US-012: Build verification
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I want to verify the esbuild bundle produces a valid IIFE bookmarklet that can replace the hand-written one.
 
 **Acceptance Criteria:**
