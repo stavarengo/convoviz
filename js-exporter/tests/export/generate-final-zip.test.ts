@@ -351,6 +351,116 @@ describe("generateFinalZip", () => {
   });
 });
 
+describe("generateFinalZip metadata-based folder placement", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import("../../src/state/export-blobs");
+    await mod.initExportBlobsIdb();
+    await mod.ExportBlobStore.clear();
+    vi.resetModules();
+  });
+
+  it("places files using metadata type instead of key prefix convention", async () => {
+    const { initExportBlobsIdb, ExportBlobStore } = await import(
+      "../../src/state/export-blobs"
+    );
+    const { generateFinalZip } = await import(
+      "../../src/export/generate-final-zip"
+    );
+    await initExportBlobsIdb();
+
+    // Store an attachment file
+    await ExportBlobStore.putFile("file-abc_report.pdf", new Blob(["pdf-data"]));
+    await ExportBlobStore.putFileMeta({
+      key: "file-abc_report.pdf",
+      type: "attachment",
+      conversationId: "conv-1",
+    });
+
+    // Store a knowledge file
+    await ExportBlobStore.putFile("kf/MyProject/doc.pdf", new Blob(["kf-data"]));
+    await ExportBlobStore.putFileMeta({
+      key: "kf/MyProject/doc.pdf",
+      type: "knowledge-file",
+      projectName: "MyProject",
+    });
+
+    const { writable, result } = collectStream();
+    await generateFinalZip({
+      exportBlobStore: ExportBlobStore,
+      getWritableStream: async () => writable,
+    });
+
+    const buf = result();
+    const names = findEntryNames(buf);
+
+    // Attachment at root, knowledge file in kf/ folder
+    expect(names).toContain("file-abc_report.pdf");
+    expect(names).toContain("kf/MyProject/doc.pdf");
+  });
+
+  it("falls back to key prefix convention for files without metadata", async () => {
+    const { initExportBlobsIdb, ExportBlobStore } = await import(
+      "../../src/state/export-blobs"
+    );
+    const { generateFinalZip } = await import(
+      "../../src/export/generate-final-zip"
+    );
+    await initExportBlobsIdb();
+
+    // Store files WITHOUT metadata (simulating pre-migration data)
+    await ExportBlobStore.putFile("file-old.png", new Blob(["old-attachment"]));
+    await ExportBlobStore.putFile("kf/OldProject/old.csv", new Blob(["old-kf"]));
+
+    const { writable, result } = collectStream();
+    await generateFinalZip({
+      exportBlobStore: ExportBlobStore,
+      getWritableStream: async () => writable,
+    });
+
+    const buf = result();
+    const names = findEntryNames(buf);
+
+    // Files should appear at their IDB key paths (backward compat via key prefix)
+    expect(names).toContain("file-old.png");
+    expect(names).toContain("kf/OldProject/old.csv");
+  });
+
+  it("handles mix of files with and without metadata", async () => {
+    const { initExportBlobsIdb, ExportBlobStore } = await import(
+      "../../src/state/export-blobs"
+    );
+    const { generateFinalZip } = await import(
+      "../../src/export/generate-final-zip"
+    );
+    await initExportBlobsIdb();
+
+    // Old file without metadata
+    await ExportBlobStore.putFile("file-old.png", new Blob(["old-data"]));
+
+    // New file with metadata
+    await ExportBlobStore.putFile("file-new.jpg", new Blob(["new-data"]));
+    await ExportBlobStore.putFileMeta({
+      key: "file-new.jpg",
+      type: "attachment",
+      conversationId: "conv-2",
+    });
+
+    const { writable, result } = collectStream();
+    await generateFinalZip({
+      exportBlobStore: ExportBlobStore,
+      getWritableStream: async () => writable,
+    });
+
+    const buf = result();
+    const names = findEntryNames(buf);
+
+    // Both files should be present at root level
+    expect(names).toContain("file-old.png");
+    expect(names).toContain("file-new.jpg");
+  });
+});
+
 describe("downloadFinalZip", () => {
   beforeEach(async () => {
     vi.resetModules();

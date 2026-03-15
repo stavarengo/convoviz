@@ -6,12 +6,11 @@ import { createSaveDebounce } from "./state/debounce";
 import { createNet } from "./net/net";
 import { createTaskList } from "./ui/task-list";
 import { createUI } from "./ui/panel";
-import { createExporter } from "./export/exporter";
+import { bootstrap } from "./bootstrap";
+import { createCoordinator } from "./export/coordinator";
+import { createDiscoveryStore } from "./state/discovery-store";
 import { downloadFinalZip } from "./export/generate-final-zip";
-import { scanConversations } from "./scan/conversations";
-import { scanProjects, scanProjectConversations } from "./scan/projects";
 import { extractFileRefs } from "./scan/file-refs";
-import { computeChanges } from "./scan/changes";
 import { reconcileExportState } from "./state/reconcile";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -90,8 +89,6 @@ export const createAddLog = (
     _renderLogs = () => ui.renderLogs();
 
     // Reconcile IDB export data with state after a potential page reload.
-    // Conversations written to IDB but not yet reflected in S.progress.exported
-    // (due to debounce not firing before reload) get added back.
     await reconcileExportState({
       S,
       getAllConvKeys: () => ExportBlobStore.getAllConvKeys(),
@@ -99,25 +96,37 @@ export const createAddLog = (
       addLog,
     });
 
-    const exporter = createExporter({
+    // Initialize discovery store and seed from existing export state
+    const discoveryStore = createDiscoveryStore();
+    await discoveryStore.init();
+    await discoveryStore.seedFromExportState(S.progress.exported || {});
+
+    // Bootstrap event-driven components
+    const components = bootstrap({
       S,
       net,
-      ui,
-      taskList,
+      discoveryStore,
       exportBlobStore: ExportBlobStore,
+      taskList,
       addLog,
       saveDebounce,
-      scanConversations,
-      scanProjects,
-      scanProjectConversations,
       extractFileRefs,
-      computeChanges,
+    });
+
+    // Create thin coordinator
+    const coordinator = createCoordinator({
+      ...components,
+      S,
+      ui,
+      addLog,
+      saveDebounce,
       assertOnChatGPT,
+      net,
       onExportComplete: triggerDownload,
     });
 
-    // Wire exporter into UI (for start/stop/rescan buttons)
-    (ui as any).setExporter(exporter);
+    // Wire coordinator into UI (for start/stop/rescan buttons)
+    (ui as any).setExporter(coordinator);
 
     // Inject the floating panel
     ui.inject();
@@ -125,16 +134,17 @@ export const createAddLog = (
     // Expose globals (matching the monolith)
     (window as any).__cvz_S = S;
     (window as any).__cvz_Net = net;
-    (window as any).__cvz_Exporter = exporter;
+    (window as any).__cvz_Exporter = coordinator;
     (window as any).__cvz_UI = ui;
     (window as any).__cvz_TaskList = taskList;
 
     // Expose convenience aliases per FR-9
     (window as any).__cvz_state = S;
-    (window as any).__cvz_stop = () => exporter.stop();
+    (window as any).__cvz_stop = () => coordinator.stop();
     (window as any).__cvz_reset = async () => {
       await Store.reset();
       await ExportBlobStore.clear();
+      await discoveryStore.clear();
       S = await Store.load();
       addLog("State reset via __cvz_reset.");
       ui.renderAll();

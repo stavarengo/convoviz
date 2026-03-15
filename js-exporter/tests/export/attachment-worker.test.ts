@@ -18,6 +18,7 @@ describe("createAttachmentWorker", () => {
   };
   let mockExportBlobStore: {
     putFile: ReturnType<typeof vi.fn>;
+    putFileMeta: ReturnType<typeof vi.fn>;
     hasFilePrefix: ReturnType<typeof vi.fn>;
   };
 
@@ -29,6 +30,7 @@ describe("createAttachmentWorker", () => {
     };
     mockExportBlobStore = {
       putFile: vi.fn().mockResolvedValue(undefined),
+      putFileMeta: vi.fn().mockResolvedValue(undefined),
       hasFilePrefix: vi.fn().mockResolvedValue(false),
     };
   });
@@ -132,6 +134,43 @@ describe("createAttachmentWorker", () => {
         "file-3.bin",
         blob,
       );
+    });
+  });
+
+  describe("file metadata: writes type and conversationId", () => {
+    it("writes attachment metadata entry alongside the file blob", async () => {
+      const meta = {
+        download_url: "https://files.oaiusercontent.com/abc123",
+      };
+      const blob = new Blob(["file content"], { type: "application/pdf" });
+      mockNet.fetchJson.mockResolvedValue(meta);
+      mockNet.fetchBlob.mockResolvedValue(blob);
+
+      const item = makeAttachmentItem({
+        id: "file-1",
+        name: "report.pdf",
+        conversationId: "conv-42",
+      });
+      const signal = new AbortController().signal;
+      const worker = await buildWorker();
+      await worker(item, signal);
+
+      expect(mockExportBlobStore.putFileMeta).toHaveBeenCalledWith({
+        key: "file-1_report.pdf",
+        type: "attachment",
+        conversationId: "conv-42",
+      });
+    });
+
+    it("does not write metadata when file is skipped by dedup", async () => {
+      mockExportBlobStore.hasFilePrefix.mockResolvedValue(true);
+
+      const item = makeAttachmentItem({ id: "file-1" });
+      const signal = new AbortController().signal;
+      const worker = await buildWorker();
+      await worker(item, signal);
+
+      expect(mockExportBlobStore.putFileMeta).not.toHaveBeenCalled();
     });
   });
 

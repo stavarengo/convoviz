@@ -1,7 +1,7 @@
 # PRD: Event-Driven Exporter Architecture
 
 **Project:** Convoviz JS Exporter
-**Branch:**
+**Branch:** ralph/007.2026-03-15.event-driven-exporter
 
 ## Introduction
 
@@ -27,7 +27,7 @@ This feature rewrites the exporter as a fully event-driven, decoupled system. Sc
 
 ### US-001: In-Memory Event Bus with Domain Event Types
 
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need a typed, in-memory pub/sub event bus and a complete set of domain event types so that all components can communicate through events without direct coupling.
 
 **Acceptance Criteria:**
@@ -54,7 +54,7 @@ This feature rewrites the exporter as a fully event-driven, decoupled system. Sc
 
 ### US-002: IDB Discovery Store
 
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need IDB object stores for conversation records, project records, and scanner pagination state so that discovery results persist across page reloads and scanners can resume from where they stopped.
 
 **Acceptance Criteria:**
@@ -74,7 +74,7 @@ This feature rewrites the exporter as a fully event-driven, decoupled system. Sc
 
 ### US-003: Resumable Conversation Scanner
 
-**Status:** pending
+**Status:** done
 **Description:** As the exporter, I need a resumable conversation scanner that paginates the ChatGPT API, persists its progress to IDB, checks the discovery store for duplicates, and emits domain events — so that scanning survives page reloads and only signals work that actually needs doing.
 
 **Acceptance Criteria:**
@@ -101,7 +101,7 @@ This feature rewrites the exporter as a fully event-driven, decoupled system. Sc
 
 ### US-004: Project Scanner and Knowledge File Discovery
 
-**Status:** pending
+**Status:** done
 **Description:** As the exporter, I need a project scanner that discovers projects and emits events, triggering both project-specific conversation scanning and knowledge file discovery for each project found.
 
 **Acceptance Criteria:**
@@ -120,7 +120,7 @@ This feature rewrites the exporter as a fully event-driven, decoupled system. Sc
 
 ### US-005: Bootstrap Wiring and Queue Listener Registration
 
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need all event-to-queue wiring to happen at bootstrap time so that no component references queues directly — scanners emit events, bootstrap-registered listeners route work into queues.
 
 **Acceptance Criteria:**
@@ -143,7 +143,7 @@ This feature rewrites the exporter as a fully event-driven, decoupled system. Sc
 
 ### US-006: Worker-Level Dedup
 
-**Status:** pending
+**Status:** done
 **Description:** As the exporter, I need workers to validate against the discovery store before processing as a safety net against duplicate work — even when the scanner already emitted the correct event.
 
 **Acceptance Criteria:**
@@ -156,7 +156,7 @@ This feature rewrites the exporter as a fully event-driven, decoupled system. Sc
 
 ### US-007: Coordinator Refactor and Old Code Removal
 
-**Status:** pending
+**Status:** done
 **Description:** As the exporter, I need the coordinator rewritten as a thin lifecycle orchestrator that delegates all scanning to standalone scanners and all queue management to bootstrap-created queues, with all monolithic logic removed.
 
 **Acceptance Criteria:**
@@ -176,7 +176,7 @@ This feature rewrites the exporter as a fully event-driven, decoupled system. Sc
 
 ### US-008: Unified File Storage Model
 
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need file storage entries to carry a type flag so that ZIP generation determines folder placement from stored metadata rather than relying on key prefix conventions.
 
 **Acceptance Criteria:**

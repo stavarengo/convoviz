@@ -1,0 +1,161 @@
+# PRD: Event-Driven Exporter Architecture
+
+Base commit: 49d319072cdd86fc5e73168ba7568fbe05c2e9aa
+
+## Codebase Patterns
+
+- JS exporter uses `vitest` for tests, `fake-indexeddb` for IDB mocking, `jsdom` for DOM
+- Tests live in `js-exporter/tests/` mirroring the `src/` directory structure
+- Factory pattern is standard: `createQueue()`, `createEventBus()`, `createDiscoveryStore()`, etc.
+- Types are centralized in `src/types.ts`; module-specific types are co-located
+- `npx tsc --noEmit` for typecheck, `npx vitest run` for tests
+- Must `npm install` in `js-exporter/` before running tests in worktrees
+- EventBus listeners are called synchronously; async listeners' promises are not awaited. Test async listeners by calling the function directly or collecting promises.
+- Bootstrap wiring tests use `vi.waitFor()` to handle async event listeners (discovery store lookups are async even though EventBus emit is synchronous)
+- Chat worker emits `conversation-files-discovered` and `conversation-exported` events instead of calling `attachmentQueue.enqueue()` directly; the bootstrap wires these events to queues
+- The coordinator (`src/export/coordinator.ts`) is a thin lifecycle orchestrator; all scan logic is in scanners, all queue creation in `bootstrap.ts`
+- Queue completion is detected via the Promise returned by `queue.start()` resolving when the queue drains
+- Bootstrap exposes `setScanAbortSignal()` and `getSpawnedScannerPromises()` for coordinator control of project-spawned scanners
+- `main.ts` initializes the discovery store, calls `bootstrap()`, then `createCoordinator()` -- the entry point wiring
+
+Squash from: 49d319072cdd86fc5e73168ba7568fbe05c2e9aa
+
+## 2026-03-15 - US-001
+
+- Implemented `EventBus` class in `js-exporter/src/events/bus.ts` using `createEventBus()` factory
+- Defined all domain event types and `EventMap` interface in `js-exporter/src/events/types.ts`
+- Files changed: `src/events/bus.ts`, `src/events/types.ts`, `tests/events/bus.test.ts`
+- 13 unit tests covering: register+emit, multiple listeners, unsubscribe, off(), error isolation, clear(), emit-with-no-listeners, typed payloads for all complex event types
+- **Learnings for future iterations:**
+
+  - The `EventMap` interface imports `ProjectFile` from `../types` -- future event types that reference shared types should follow this pattern
+  - Listener map uses `Map<keyof EventMap, Array<Listener<never>>>` with casting at call sites -- this is the simplest approach to avoid TypeScript generic variance issues with heterogeneous listener storage
+
+---
+
+## 2026-03-15 - US-002
+
+- Implemented `DiscoveryStore` in `js-exporter/src/state/discovery-store.ts` using `createDiscoveryStore()` factory
+- New IDB database `cvz-discovery` with three object stores: `conversations` (keyPath: `id`), `projects` (keyPath: `gizmoId`), `scanners` (keyPath: `scannerId`)
+- Full async CRUD API plus `seedFromExportState()` for one-time migration from `ExportState.progress.exported`
+- Files changed: `src/state/discovery-store.ts`, `tests/state/discovery-store.test.ts`
+- 19 unit tests covering: CRUD for all three stores, overwrite behavior, empty store returns, seeding from ExportState (including no-overwrite of existing records), clear()
+- **Learnings for future iterations:**
+
+  - IDB object stores with `keyPath` require `fake-indexeddb/auto` tests to clear data between tests via `store.clear()` in `beforeEach` -- data persists across `vi.resetModules()` because the IDB database itself is global in fake-indexeddb
+  - The `DiscoveryStore` types (`ConversationRecord`, `ProjectRecord`, `ScannerState`) are co-located in the module file rather than `types.ts`, following the pattern of module-specific types
+
+---
+
+## 2026-03-15 - US-003
+
+- Implemented `createConversationScanner(deps)` factory in `js-exporter/src/scan/scanner.ts`
+- Single reusable scanner parameterized by `gizmoId` (null for general, string for project-specific)
+- Resumes from IDB-persisted scanner state on restart; persists offset after each page
+- Dedup via discovery store: new -> `conversation-needs-export`, changed updateTime -> `conversation-needs-update`, unchanged -> `conversation-up-to-date`
+- Abort preserves state as `interrupted` for next-run resumption; completion deletes state
+- Files changed: `src/scan/scanner.ts`, `tests/scan/scanner.test.ts`
+- 11 unit tests covering: full pagination (multi-page), resume from saved state, dedup (new/update/up-to-date/mixed), abort preserves state, project-specific gizmo_id URL, state persistence after each page, record-before-event ordering
+- **Learnings for future iterations:**
+
+  - Scanner tests use a mock EventBus that records emitted events in an `emitted` array for assertion -- this pattern avoids needing `fake-indexeddb/auto` for the event bus while still verifying emit order
+  - The scanner catches `AbortError` from `fetchJson` and breaks out of the loop rather than rethrowing -- this allows the post-loop interrupted-state logic to run cleanly
+  - The `limit` parameter is optional in deps (defaults to 100) to keep the public API clean while allowing tests to use small page sizes
+
+---
+
+## 2026-03-15 - US-004
+
+- Implemented `createProjectScanner(deps)` factory in `js-exporter/src/scan/project-scanner.ts`
+- Paginates the gizmo sidebar API using cursor-based pagination, emits `project-discovered` for each project
+- Persists projects to discovery store before emitting events (crash resilience)
+- Exported `discoverKnowledgeFiles()` utility for bootstrap listeners to call on `project-discovered` events
+- Knowledge file dedup: checks blob store (`hasFilePrefix`) and dead-letter set before emitting `knowledge-file-discovered`
+- Files changed: `src/scan/project-scanner.ts`, `tests/scan/project-scanner.test.ts`
+- 9 unit tests covering: full pagination (multi-page with cursor), persist-before-emit ordering, skip malformed gizmos, abort handling, conversation scanner creation trigger, KF discovery (new files, blob store dedup, dead-letter dedup), end-to-end project-discovered -> KF discovery chain
+- **Learnings for future iterations:**
+
+  - The event bus calls listeners synchronously and does not await async listener return values. Tests for async bootstrap listeners (e.g., `discoverKnowledgeFiles`) must either test the function directly or collect and `await` the Promises returned by the listeners.
+  - The project scanner uses cursor-based pagination (unlike the conversation scanner which uses offset/limit), matching the existing `scanProjects` implementation in `scan/projects.ts`.
+  - `discoverKnowledgeFiles` is a standalone exported function (not part of the scanner) because the PRD specifies listeners are registered at bootstrap, not inside the scanner.
+
+---
+
+## 2026-03-15 - US-005
+
+- Created `js-exporter/src/bootstrap.ts` with `bootstrap(deps)` function that creates and returns: eventBus, chatQueue, attachmentQueue, knowledgeQueue, conversationScanner, projectScanner
+- Registers 6 event listeners during bootstrap: conversation-needs-export, conversation-needs-update, conversation-exported, conversation-files-discovered, project-discovered, knowledge-file-discovered
+- Modified chat worker (`src/export/chat-worker.ts`) to emit `conversation-files-discovered` and `conversation-exported` events via EventBus instead of calling `attachmentQueue.enqueue()` directly
+- Updated `src/export/exporter.ts` to create an EventBus and wire `conversation-files-discovered` -> attachment queue (transitional: full coordinator refactor is US-007)
+- Attachment worker and knowledge file worker: unchanged (already self-contained)
+- Files changed: `src/bootstrap.ts`, `src/export/chat-worker.ts`, `src/export/exporter.ts`, `tests/bootstrap.test.ts`, `tests/export/chat-worker.test.ts`
+- 9 bootstrap unit tests + 3 updated chat worker tests; all 469 tests pass
+- **Learnings for future iterations:**
+
+  - The `enqueueConversation` handler in bootstrap is shared by both `conversation-needs-export` and `conversation-needs-update` listeners since they have identical logic (look up discovery store, add task list entry, enqueue into chat queue)
+  - Bootstrap listeners for conversation events use `.then()` chaining (not async/await) because EventBus.emit is synchronous and doesn't await listener return values. Tests must use `vi.waitFor()` to assert async effects.
+  - The exporter.ts still creates its own queues inline for the transitional period. US-007 will refactor the exporter to receive all components from `bootstrap()`.
+  - The `_attachmentQueueProxy` pattern in exporter.ts was replaced by an event listener on `conversation-files-discovered` that handles both task list entries and queue enqueue.
+
+---
+
+## 2026-03-15 - US-006
+
+- Added worker-level dedup to chat worker: checks discovery store before fetching conversation JSON. If record status is `'exported'` and `updateTime` matches, skips processing (returns as no-op success, counted as "done" by queue).
+- Added `discoveryStore` dependency to `ChatWorkerDeps` interface
+- Updated `bootstrap.ts` to pass `discoveryStore` to `createChatWorker`
+- Updated `exporter.ts` with a no-op stub `{ getConversation: async () => null }` for the transitional period (to be removed in US-007)
+- Verified attachment worker existing blob store dedup (`hasFilePrefix`) still works correctly in event-driven flow
+- Verified knowledge file worker dedup is handled at the `discoverKnowledgeFiles` level (before events are emitted), not inside the worker itself
+- Files changed: `src/export/chat-worker.ts`, `src/bootstrap.ts`, `src/export/exporter.ts`, `tests/export/chat-worker.test.ts`
+- 4 new dedup tests in chat-worker.test.ts (skip on exported+same updateTime, proceed on exported+different updateTime, proceed on status 'new', proceed on null record); all 473 tests pass
+- **Learnings for future iterations:**
+
+  - When adding a new dependency to a worker, all call sites (`bootstrap.ts`, `exporter.ts`, tests) must be updated. For the transitional exporter that doesn't have the dependency, a no-op stub like `{ getConversation: async () => null }` avoids breaking the old code path.
+  - Worker-level dedup returns early (no throw) so the queue counts the item as "done" -- this is the correct behavior per the PRD acceptance criteria.
+
+---
+
+## 2026-03-15 - US-007
+
+- Created `js-exporter/src/export/coordinator.ts` with `createCoordinator(deps)` factory -- thin lifecycle orchestrator
+- Coordinator receives all components from `bootstrap()`: eventBus, queues, scanners, setScanAbortSignal, getSpawnedScannerPromises
+- `rescan()`: starts general conversation scanner + project scanner, waits for both + any project-spawned scanners
+- `start()`: starts all queues + scanners, tracks completion via scanner-complete events + queue drain (Promise resolution from queue.start())
+- `stop()`: aborts all scanners, stops all queues, calls `eventBus.clear()` for clean teardown
+- Updated `bootstrap.ts` to expose `setScanAbortSignal()` and `getSpawnedScannerPromises()` for coordinator control of project-spawned scanners
+- Updated `main.ts` to use `bootstrap()` + `createCoordinator()` instead of old `createExporter()`. Also initializes `discoveryStore` and seeds it from `ExportState.progress.exported`.
+- Deleted `src/export/exporter.ts` (the monolithic exporter with ~950 lines of inline scan/queue logic)
+- Deleted `tests/export/exporter.test.ts` and `tests/export/exporter-queues.test.ts` (replaced by coordinator tests)
+- Files changed: `src/export/coordinator.ts` (new), `src/bootstrap.ts`, `src/main.ts`, `tests/export/coordinator.test.ts` (new)
+- Files deleted: `src/export/exporter.ts`, `tests/export/exporter.test.ts`, `tests/export/exporter-queues.test.ts`
+- 9 integration tests covering: start->scan->export->complete, stop-while-running, rescan-while-stopped, already-running guard, not-running stop guard, onExportComplete trigger, eventBus.clear on stop, end-to-end scan->export->file-download, import graph verification
+- **Learnings for future iterations:**
+
+  - The coordinator uses `setScanAbortSignal(signal)` from bootstrap to share its abort signal with project-spawned scanners -- this avoids the bootstrap creating uncontrollable AbortControllers.
+  - Queue completion is detected via the Promise returned by `queue.start()` -- when the queue drains, the start promise resolves. No separate `onDrained` callback is needed from the coordinator's perspective.
+  - Scanner completion detection has a fallback: if `scanner-complete` events never fire (e.g., 0 items scanned), the coordinator marks scanners complete after awaiting their promises.
+  - The old `exporter.ts` is now fully dead code -- `main.ts` no longer imports it. The coordinator (342 lines) replaces the monolithic exporter (~950 lines) with zero scan logic and zero queue creation.
+
+---
+
+## 2026-03-15 - US-008
+
+- Added `FileMeta` interface and `file-meta` object store to `cvz-export-blobs` IDB database (version bumped from 1 to 2)
+- New methods on `ExportBlobStore`: `putFileMeta()`, `getFileMeta()`, `iterateFileMeta()`; `clear()` now also clears the metadata store
+- Attachment worker now writes metadata entry with `type: 'attachment'` and `conversationId` after storing each file blob
+- Knowledge file worker now writes metadata entry with `type: 'knowledge-file'` and `projectName` after storing each file blob (not for `project.json` files)
+- `generateFinalZip()` loads metadata map via optional `iterateFileMeta` on `FinalZipBlobStore` interface; currently both metadata-driven and fallback paths use the IDB key as the ZIP path (behavior unchanged), but the metadata is loaded for future folder restructuring
+- Updated `BootstrapDeps` interface to require `putFileMeta` on `exportBlobStore`
+- Updated all test mocks (bootstrap, coordinator) to include `putFileMeta`
+- Updated `js/script.min.js` reference bundle
+- Files changed: `src/state/export-blobs.ts`, `src/export/attachment-worker.ts`, `src/export/knowledge-worker.ts`, `src/export/generate-final-zip.ts`, `src/bootstrap.ts`, `tests/state/export-blobs.test.ts`, `tests/export/attachment-worker.test.ts`, `tests/export/knowledge-worker.test.ts`, `tests/export/generate-final-zip.test.ts`, `tests/bootstrap.test.ts`, `tests/export/coordinator.test.ts`, `js/script.min.js`
+- 13 new tests: 6 export-blobs metadata tests, 2 attachment worker metadata tests, 2 knowledge worker metadata tests, 3 generate-final-zip metadata placement tests; all 470 tests pass
+- **Learnings for future iterations:**
+
+  - The `cvz-export-blobs` IDB database version was bumped from 1 to 2 for the `file-meta` store. Future schema changes need to bump this version and add `if (!db.objectStoreNames.contains(...))` guards in `onupgradeneeded`.
+  - `FinalZipBlobStore.iterateFileMeta` is optional (with `?`) to maintain backward compatibility with callers that pass a store without metadata support (e.g., old tests). This pattern is useful for non-breaking interface extensions.
+  - Workers import `FileMeta` as a type-only import (`import type { FileMeta }`) since it's only used for type checking, not as a runtime value.
+
+---
+Final commit: 1984d90b3f61c8c71820901ffcc90398bb17438f

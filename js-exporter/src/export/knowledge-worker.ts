@@ -1,4 +1,5 @@
 import type { QueueItem } from "./queue";
+import type { FileMeta } from "../state/export-blobs";
 import { sanitizeName } from "../utils/sanitize";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -36,6 +37,7 @@ export interface KnowledgeWorkerDeps {
   };
   exportBlobStore: {
     putFile(path: string, blob: Blob): Promise<void>;
+    putFileMeta(meta: FileMeta): Promise<void>;
   };
   projects: Array<{ gizmoId: string; name: string; raw: unknown }>;
 }
@@ -93,10 +95,13 @@ export const createKnowledgeWorker = (
     // Store blob at kf/{sanitizedProjectName}/{sanitizedFileName}
     const safeProjName = sanitizeName(item.projectName);
     const safeFname = sanitizeName(item.fileName);
-    await exportBlobStore.putFile(
-      "kf/" + safeProjName + "/" + safeFname,
-      blob,
-    );
+    const filePath = "kf/" + safeProjName + "/" + safeFname;
+    await exportBlobStore.putFile(filePath, blob);
+    await exportBlobStore.putFileMeta({
+      key: filePath,
+      type: "knowledge-file",
+      projectName: item.projectName,
+    });
 
     // Store project.json (idempotent write — same data each time)
     const proj = projects.find((p) => p.gizmoId === item.projectId);

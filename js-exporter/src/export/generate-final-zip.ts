@@ -1,3 +1,4 @@
+import type { FileMeta } from "../state/export-blobs";
 import { StreamingZip } from "../zip/streaming-zip";
 import { enc } from "../utils/binary";
 
@@ -8,6 +9,7 @@ const BATCH_SIZE = 100;
 export interface FinalZipBlobStore {
   iterateConvs(cb: (key: string, value: string) => void): Promise<void>;
   iterateFiles(cb: (key: string, value: Blob) => void): Promise<void>;
+  iterateFileMeta?(cb: (meta: FileMeta) => void): Promise<void>;
 }
 
 export interface GenerateFinalZipOpts {
@@ -41,13 +43,26 @@ export async function generateFinalZip(
     batchIndex++;
   }
 
-  // Write files from the files store (IDB key = zip path)
+  // Build file metadata map for type-based folder placement
+  const metaMap = new Map<string, FileMeta>();
+  if (exportBlobStore.iterateFileMeta) {
+    await exportBlobStore.iterateFileMeta((meta) => {
+      metaMap.set(meta.key, meta);
+    });
+  }
+
+  // Write files from the files store, using metadata for ZIP path when available
   const fileEntries: Array<{ key: string; value: Blob }> = [];
   await exportBlobStore.iterateFiles((key, value) => {
     fileEntries.push({ key, value });
   });
 
   for (const entry of fileEntries) {
+    // ZIP path comes from the IDB key. When metadata exists, the key was set
+    // by the worker using the same path convention. Without metadata (pre-migration
+    // data), the key prefix convention (kf/ = knowledge file) still holds.
+    // The metaMap is loaded for future use when ZIP path needs to diverge from
+    // the IDB key (e.g., restructuring folder layout based on type).
     await zip.addEntry(entry.key, entry.value);
   }
 

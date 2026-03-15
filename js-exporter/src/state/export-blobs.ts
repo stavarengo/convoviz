@@ -1,12 +1,20 @@
 const DB_NAME = "cvz-export-blobs";
 const CONV_STORE = "conv";
 const FILES_STORE = "files";
+const FILE_META_STORE = "file-meta";
+
+export interface FileMeta {
+  key: string;
+  type: "attachment" | "knowledge-file";
+  conversationId?: string;
+  projectName?: string;
+}
 
 let _db: IDBDatabase | null = null;
 
 const openDb = (): Promise<IDBDatabase> =>
   new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(CONV_STORE)) {
@@ -14,6 +22,9 @@ const openDb = (): Promise<IDBDatabase> =>
       }
       if (!db.objectStoreNames.contains(FILES_STORE)) {
         db.createObjectStore(FILES_STORE);
+      }
+      if (!db.objectStoreNames.contains(FILE_META_STORE)) {
+        db.createObjectStore(FILE_META_STORE, { keyPath: "key" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -155,8 +166,39 @@ export const ExportBlobStore = {
     });
   },
 
+  async putFileMeta(meta: FileMeta): Promise<void> {
+    if (!_db) return;
+    await new Promise<void>((resolve, reject) => {
+      const tx = _db!.transaction(FILE_META_STORE, "readwrite");
+      const store = tx.objectStore(FILE_META_STORE);
+      const req = store.put(meta);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  },
+
+  async getFileMeta(key: string): Promise<FileMeta | null> {
+    if (!_db) return null;
+    return new Promise((resolve, reject) => {
+      const tx = _db!.transaction(FILE_META_STORE, "readonly");
+      const store = tx.objectStore(FILE_META_STORE);
+      const req = store.get(key);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => reject(req.error);
+    });
+  },
+
+  async iterateFileMeta(
+    cb: (meta: FileMeta) => void,
+  ): Promise<void> {
+    await idbCursorIterate<FileMeta>(FILE_META_STORE, (_key, value) => {
+      cb(value);
+    });
+  },
+
   async clear(): Promise<void> {
     await idbClear(CONV_STORE);
     await idbClear(FILES_STORE);
+    await idbClear(FILE_META_STORE);
   },
 };

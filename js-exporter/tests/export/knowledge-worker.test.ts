@@ -21,6 +21,7 @@ describe("createKnowledgeWorker", () => {
   };
   let mockExportBlobStore: {
     putFile: ReturnType<typeof vi.fn>;
+    putFileMeta: ReturnType<typeof vi.fn>;
   };
   let mockProjects: Array<{
     gizmoId: string;
@@ -36,6 +37,7 @@ describe("createKnowledgeWorker", () => {
     };
     mockExportBlobStore = {
       putFile: vi.fn().mockResolvedValue(undefined),
+      putFileMeta: vi.fn().mockResolvedValue(undefined),
     };
     mockProjects = [
       { gizmoId: "proj-1", name: "My GPT", raw: { id: "proj-1", title: "My GPT" } },
@@ -137,6 +139,52 @@ describe("createKnowledgeWorker", () => {
         (c: [string, Blob]) => c[0] === "kf/My GPT/project.json",
       );
       expect(projectJsonCalls).toHaveLength(2);
+    });
+  });
+
+  describe("file metadata: writes type and projectName", () => {
+    it("writes knowledge-file metadata entry alongside the file blob", async () => {
+      const meta = {
+        status: "success",
+        download_url: "https://files.oaiusercontent.com/kf-123",
+      };
+      const blob = new Blob(["csv data"], { type: "text/csv" });
+      mockNet.fetchJson.mockResolvedValue(meta);
+      mockNet.fetchBlob.mockResolvedValue(blob);
+
+      const item = makeKnowledgeFileItem({
+        projectName: "My GPT",
+        fileName: "data.csv",
+      });
+      const signal = new AbortController().signal;
+      const worker = await buildWorker();
+      await worker(item, signal);
+
+      expect(mockExportBlobStore.putFileMeta).toHaveBeenCalledWith({
+        key: "kf/My GPT/data.csv",
+        type: "knowledge-file",
+        projectName: "My GPT",
+      });
+    });
+
+    it("does not write metadata for project.json files", async () => {
+      const meta = {
+        status: "success",
+        download_url: "https://files.oaiusercontent.com/kf-123",
+      };
+      const blob = new Blob(["csv data"], { type: "text/csv" });
+      mockNet.fetchJson.mockResolvedValue(meta);
+      mockNet.fetchBlob.mockResolvedValue(blob);
+
+      const item = makeKnowledgeFileItem();
+      const signal = new AbortController().signal;
+      const worker = await buildWorker();
+      await worker(item, signal);
+
+      // Only 1 metadata call for the actual file, not for project.json
+      const metaCalls = mockExportBlobStore.putFileMeta.mock.calls;
+      expect(metaCalls).toHaveLength(1);
+      expect(metaCalls[0][0].key).not.toContain("project.json");
     });
   });
 

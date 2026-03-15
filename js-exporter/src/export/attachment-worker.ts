@@ -1,4 +1,5 @@
 import type { QueueItem } from "./queue";
+import type { FileMeta } from "../state/export-blobs";
 import { sanitizeName } from "../utils/sanitize";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -23,6 +24,7 @@ export interface AttachmentWorkerDeps {
   };
   exportBlobStore: {
     putFile(path: string, blob: Blob): Promise<void>;
+    putFileMeta(meta: FileMeta): Promise<void>;
     hasFilePrefix(prefix: string): Promise<boolean>;
   };
 }
@@ -72,5 +74,10 @@ export const createAttachmentWorker = (
       : item.id + "." + sanitizeName(ext);
 
     await exportBlobStore.putFile(fname, blob);
+    await exportBlobStore.putFileMeta({
+      key: fname,
+      type: "attachment",
+      conversationId: item.conversationId,
+    });
   };
 };

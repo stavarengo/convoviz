@@ -213,4 +213,102 @@ describe("ExportBlobStore", () => {
     // IDB keys are returned in ascending order by default
     expect(keys).toEqual(["a-conv", "m-conv", "z-conv"]);
   });
+
+  describe("file metadata", () => {
+    it("putFileMeta stores and getFileMeta retrieves metadata for a file", async () => {
+      const { initExportBlobsIdb, ExportBlobStore } = await import(
+        "../../src/state/export-blobs"
+      );
+      await initExportBlobsIdb();
+      await ExportBlobStore.putFileMeta({
+        key: "file-abc_report.pdf",
+        type: "attachment",
+        conversationId: "conv-1",
+      });
+      const meta = await ExportBlobStore.getFileMeta("file-abc_report.pdf");
+      expect(meta).toEqual({
+        key: "file-abc_report.pdf",
+        type: "attachment",
+        conversationId: "conv-1",
+      });
+    });
+
+    it("getFileMeta returns null for non-existent key", async () => {
+      const { initExportBlobsIdb, ExportBlobStore } = await import(
+        "../../src/state/export-blobs"
+      );
+      await initExportBlobsIdb();
+      const meta = await ExportBlobStore.getFileMeta("nonexistent");
+      expect(meta).toBeNull();
+    });
+
+    it("stores knowledge-file metadata with projectName", async () => {
+      const { initExportBlobsIdb, ExportBlobStore } = await import(
+        "../../src/state/export-blobs"
+      );
+      await initExportBlobsIdb();
+      await ExportBlobStore.putFileMeta({
+        key: "kf/My GPT/data.csv",
+        type: "knowledge-file",
+        projectName: "My GPT",
+      });
+      const meta = await ExportBlobStore.getFileMeta("kf/My GPT/data.csv");
+      expect(meta).toEqual({
+        key: "kf/My GPT/data.csv",
+        type: "knowledge-file",
+        projectName: "My GPT",
+      });
+    });
+
+    it("iterateFileMeta yields all stored metadata entries", async () => {
+      const { initExportBlobsIdb, ExportBlobStore } = await import(
+        "../../src/state/export-blobs"
+      );
+      await initExportBlobsIdb();
+      await ExportBlobStore.putFileMeta({
+        key: "file-1.png",
+        type: "attachment",
+        conversationId: "conv-1",
+      });
+      await ExportBlobStore.putFileMeta({
+        key: "kf/Proj/doc.pdf",
+        type: "knowledge-file",
+        projectName: "Proj",
+      });
+
+      const collected: Array<{ key: string; type: string }> = [];
+      await ExportBlobStore.iterateFileMeta((meta) => {
+        collected.push({ key: meta.key, type: meta.type });
+      });
+      expect(collected).toHaveLength(2);
+      const keys = collected.map((c) => c.key).sort();
+      expect(keys).toEqual(["file-1.png", "kf/Proj/doc.pdf"]);
+    });
+
+    it("clear removes file metadata along with other stores", async () => {
+      const { initExportBlobsIdb, ExportBlobStore } = await import(
+        "../../src/state/export-blobs"
+      );
+      await initExportBlobsIdb();
+      await ExportBlobStore.putFileMeta({
+        key: "file-1.png",
+        type: "attachment",
+        conversationId: "conv-1",
+      });
+      await ExportBlobStore.clear();
+      const meta = await ExportBlobStore.getFileMeta("file-1.png");
+      expect(meta).toBeNull();
+    });
+
+    it("putFileMeta and getFileMeta are no-ops when db is not initialized", async () => {
+      const { ExportBlobStore } = await import("../../src/state/export-blobs");
+      await ExportBlobStore.putFileMeta({
+        key: "file-1.png",
+        type: "attachment",
+        conversationId: "conv-1",
+      });
+      const meta = await ExportBlobStore.getFileMeta("file-1.png");
+      expect(meta).toBeNull();
+    });
+  });
 });
