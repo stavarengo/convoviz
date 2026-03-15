@@ -1,7 +1,7 @@
 # PRD: Decouple File Downloads from Chat Export
 
 **Project:** Convoviz JS Exporter
-**Branch:**
+**Branch:** ralph/006.2026-03-15.decouple-file-downloads
 
 ## Introduction
 
@@ -23,7 +23,7 @@ This feature replaces the batch-based export model with three independent, concu
 
 ### US-001: Generic Queue Abstraction
 
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need a reusable generic queue abstraction so that all three export queues share consistent behavior for concurrency, retry, dead-letter, and lifecycle management.
 
 **Acceptance Criteria:**
@@ -46,7 +46,7 @@ This feature replaces the batch-based export model with three independent, concu
 
 ### US-002: Chat Queue Worker
 
-**Status:** pending
+**Status:** done
 **Description:** As the exporter, I need a chat queue worker function that fetches conversation JSON, extracts file references, pushes them to the attachment queue, and stores the conversation to IDB — without downloading any files inline.
 
 **Acceptance Criteria:**
@@ -63,7 +63,7 @@ This feature replaces the batch-based export model with three independent, concu
 
 ### US-003: Attachment Queue Worker
 
-**Status:** pending
+**Status:** done
 **Description:** As the exporter, I need an attachment queue worker that downloads file blobs and stores them to IDB, with dedup to skip already-downloaded files.
 
 **Acceptance Criteria:**
@@ -80,7 +80,7 @@ This feature replaces the batch-based export model with three independent, concu
 
 ### US-004: Knowledge File Queue Worker
 
-**Status:** pending
+**Status:** done
 **Description:** As the exporter, I need a knowledge file queue worker that downloads project knowledge files and stores them to IDB, adapted from the existing `exportKnowledgeBatch` logic.
 
 **Acceptance Criteria:**
@@ -96,7 +96,7 @@ This feature replaces the batch-based export model with three independent, concu
 
 ### US-005: State Model Update & v2 → v3 Migration
 
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need the `ExportState` type system updated for the queue-based model and a migration function to transform persisted v2 state into v3.
 
 **Acceptance Criteria:**
@@ -126,7 +126,7 @@ This feature replaces the batch-based export model with three independent, concu
 
 ### US-006: Queue Wiring, Exporter Refactor & Old Code Removal
 
-**Status:** pending
+**Status:** done
 **Description:** As the exporter, I need the three queues wired together in the main exporter module, replacing the batch-based export loop with queue-based concurrent execution, with the old batch code removed entirely.
 
 **Acceptance Criteria:**
@@ -158,7 +158,7 @@ This feature replaces the batch-based export model with three independent, concu
 
 ### US-007: UI Updates for Queue-Based Export
 
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want to see per-queue progress and control per-queue concurrency so I can monitor and tune the export process.
 
 **Acceptance Criteria:**

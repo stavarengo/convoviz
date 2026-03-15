@@ -16,27 +16,45 @@ import type {
   FileRef,
   Task,
   TaskStatus,
+  AttachmentItem,
 } from "../src/types";
 
 describe("types", () => {
   it("ExportState has the correct top-level shape", () => {
     const state: ExportState = {
-      v: 2,
+      v: 3,
       ver: "cvz-bookmarklet-5.0",
       projects: [],
-      settings: { batch: 50, conc: 3, pause: 300, filterGizmoId: null },
+      settings: {
+        chatConcurrency: 3,
+        fileConcurrency: 3,
+        knowledgeFileConcurrency: 3,
+        pause: 300,
+        filterGizmoId: null,
+      },
       progress: {
         exported: {},
         pending: [],
         dead: [],
         failCounts: {},
-        kfExported: [],
-        kfPending: [],
-        kfDead: [],
-        kfFailCounts: {},
+        filePending: [],
+        fileDead: [],
+        fileFailCounts: {},
+        fileDoneCount: 0,
+        knowledgeFilesExported: [],
+        knowledgeFilesPending: [],
+        knowledgeFilesDead: [],
+        knowledgeFilesFailCounts: {},
       },
       scan: { at: 0, total: 0, totalProjects: 0, snapshot: [] },
-      stats: { batches: 0, batchMs: 0, chats: 0, kfBatches: 0, kfMs: 0, kfFiles: 0 },
+      stats: {
+        chatsExported: 0,
+        chatsMs: 0,
+        filesDownloaded: 0,
+        filesMs: 0,
+        knowledgeFilesDownloaded: 0,
+        knowledgeFilesMs: 0,
+      },
       run: {
         isRunning: false,
         startedAt: 0,
@@ -44,18 +62,23 @@ describe("types", () => {
         lastError: "",
         backoffUntil: 0,
         backoffCount: 0,
-        lastPhase: "idle",
       },
       changes: { at: 0, newChats: 0, removedChats: 0, updatedChats: 0, newPending: 0, pendingDelta: 0 },
       logs: [],
     };
-    expect(state.v).toBe(2);
+    expect(state.v).toBe(3);
     expect(state.ver).toBe("cvz-bookmarklet-5.0");
   });
 
   it("Settings has all expected fields", () => {
-    const settings: Settings = { batch: 50, conc: 3, pause: 300, filterGizmoId: null };
-    expect(settings.batch).toBe(50);
+    const settings: Settings = {
+      chatConcurrency: 3,
+      fileConcurrency: 3,
+      knowledgeFileConcurrency: 3,
+      pause: 300,
+      filterGizmoId: null,
+    };
+    expect(settings.chatConcurrency).toBe(3);
     expect(settings.filterGizmoId).toBeNull();
   });
 
@@ -94,11 +117,22 @@ describe("types", () => {
     expect(item.lastError).toBe("timeout");
   });
 
+  it("AttachmentItem has id, name, conversationId, conversationTitle", () => {
+    const item: AttachmentItem = {
+      id: "file-1",
+      name: "readme.txt",
+      conversationId: "c1",
+      conversationTitle: "Chat 1",
+    };
+    expect(item.id).toBe("file-1");
+    expect(item.name).toBe("readme.txt");
+  });
+
   it("ProjectInfo has the correct shape", () => {
     const proj: ProjectInfo = {
       gizmoId: "g1",
       name: "My Project",
-      emoji: "🚀",
+      emoji: "",
       theme: "blue",
       instructions: "Do stuff",
       memoryEnabled: true,
@@ -172,21 +206,20 @@ describe("types", () => {
       lastError: "",
       backoffUntil: 0,
       backoffCount: 0,
-      lastPhase: "idle",
     };
     expect(run.isRunning).toBe(false);
   });
 
   it("Stats has all expected fields", () => {
     const stats: Stats = {
-      batches: 10,
-      batchMs: 5000,
-      chats: 100,
-      kfBatches: 2,
-      kfMs: 1000,
-      kfFiles: 5,
+      chatsExported: 100,
+      chatsMs: 5000,
+      filesDownloaded: 50,
+      filesMs: 3000,
+      knowledgeFilesDownloaded: 5,
+      knowledgeFilesMs: 1000,
     };
-    expect(stats.batches).toBe(10);
+    expect(stats.chatsExported).toBe(100);
   });
 
   it("Progress has all expected fields", () => {
@@ -195,10 +228,14 @@ describe("types", () => {
       pending: [{ id: "chat-3", title: "Test", update_time: 789, gizmo_id: null }],
       dead: [],
       failCounts: { "chat-3": 1 },
-      kfExported: [],
-      kfPending: [],
-      kfDead: [],
-      kfFailCounts: {},
+      filePending: [],
+      fileDead: [],
+      fileFailCounts: {},
+      fileDoneCount: 0,
+      knowledgeFilesExported: [],
+      knowledgeFilesPending: [],
+      knowledgeFilesDead: [],
+      knowledgeFilesFailCounts: {},
     };
     expect(progress.exported["chat-1"]).toBe(123);
   });

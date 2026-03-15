@@ -22,7 +22,7 @@ describe("defaultState", () => {
 
   it("has correct top-level fields", () => {
     const s = defaultState();
-    expect(s.v).toBe(2);
+    expect(s.v).toBe(3);
     expect(s.ver).toBe(VER);
     expect(s.projects).toEqual([]);
     expect(s.logs).toEqual([]);
@@ -31,8 +31,9 @@ describe("defaultState", () => {
   it("has correct settings defaults", () => {
     const s = defaultState();
     expect(s.settings).toEqual({
-      batch: 50,
-      conc: 3,
+      chatConcurrency: 3,
+      fileConcurrency: 3,
+      knowledgeFileConcurrency: 3,
       pause: 300,
       filterGizmoId: null,
     });
@@ -45,10 +46,14 @@ describe("defaultState", () => {
       pending: [],
       dead: [],
       failCounts: {},
-      kfExported: [],
-      kfPending: [],
-      kfDead: [],
-      kfFailCounts: {},
+      filePending: [],
+      fileDead: [],
+      fileFailCounts: {},
+      fileDoneCount: 0,
+      knowledgeFilesExported: [],
+      knowledgeFilesPending: [],
+      knowledgeFilesDead: [],
+      knowledgeFilesFailCounts: {},
     });
   });
 
@@ -65,12 +70,12 @@ describe("defaultState", () => {
   it("has correct stats defaults", () => {
     const s = defaultState();
     expect(s.stats).toEqual({
-      batches: 0,
-      batchMs: 0,
-      chats: 0,
-      kfBatches: 0,
-      kfMs: 0,
-      kfFiles: 0,
+      chatsExported: 0,
+      chatsMs: 0,
+      filesDownloaded: 0,
+      filesMs: 0,
+      knowledgeFilesDownloaded: 0,
+      knowledgeFilesMs: 0,
     });
   });
 
@@ -83,7 +88,6 @@ describe("defaultState", () => {
       lastError: "",
       backoffUntil: 0,
       backoffCount: 0,
-      lastPhase: "idle",
     });
   });
 
@@ -119,24 +123,31 @@ describe("mergeState", () => {
   it("preserves existing values for known fields", () => {
     const input: ExportState = {
       ...defaultState(),
-      settings: { batch: 100, conc: 5, pause: 500, filterGizmoId: "g1" },
+      settings: {
+        chatConcurrency: 5,
+        fileConcurrency: 4,
+        knowledgeFileConcurrency: 2,
+        pause: 500,
+        filterGizmoId: "g1",
+      },
     };
     const result = mergeState(input);
-    expect(result.settings.batch).toBe(100);
-    expect(result.settings.conc).toBe(5);
+    expect(result.settings.chatConcurrency).toBe(5);
+    expect(result.settings.fileConcurrency).toBe(4);
+    expect(result.settings.knowledgeFileConcurrency).toBe(2);
     expect(result.settings.pause).toBe(500);
     expect(result.settings.filterGizmoId).toBe("g1");
   });
 
   it("fills in missing settings fields from defaults", () => {
     const input = {
-      v: 2,
+      v: 3,
       ver: VER,
-      settings: { batch: 100 },
+      settings: { chatConcurrency: 5 },
     } as unknown as ExportState;
     const result = mergeState(input);
-    expect(result.settings.batch).toBe(100);
-    expect(result.settings.conc).toBe(3); // default
+    expect(result.settings.chatConcurrency).toBe(5);
+    expect(result.settings.fileConcurrency).toBe(3); // default
     expect(result.settings.pause).toBe(300); // default
     expect(result.settings.filterGizmoId).toBeNull(); // default
   });
@@ -148,28 +159,32 @@ describe("mergeState", () => {
         ...defaultState().progress,
         pending: [{ id: "c1", title: "Chat 1", update_time: 100, gizmo_id: null }],
         failCounts: { c1: 2 },
-        kfFailCounts: { f1: 1 },
+        knowledgeFilesFailCounts: { f1: 1 },
       },
     };
     const result = mergeState(input);
     expect(result.progress.pending).toHaveLength(1);
     expect(result.progress.failCounts).toEqual({ c1: 2 });
-    expect(result.progress.kfFailCounts).toEqual({ f1: 1 });
+    expect(result.progress.knowledgeFilesFailCounts).toEqual({ f1: 1 });
   });
 
   it("migrates array-based exported to object", () => {
     const input = {
-      v: 2,
+      v: 3,
       ver: VER,
       progress: {
         exported: ["id1", "id2", "id3"],
         pending: [],
         dead: [],
         failCounts: {},
-        kfExported: [],
-        kfPending: [],
-        kfDead: [],
-        kfFailCounts: {},
+        filePending: [],
+        fileDead: [],
+        fileFailCounts: {},
+        fileDoneCount: 0,
+        knowledgeFilesExported: [],
+        knowledgeFilesPending: [],
+        knowledgeFilesDead: [],
+        knowledgeFilesFailCounts: {},
       },
     } as unknown as ExportState;
     const result = mergeState(input);
@@ -178,7 +193,7 @@ describe("mergeState", () => {
 
   it("resets exported to {} if it's not an object", () => {
     const input = {
-      v: 2,
+      v: 3,
       ver: VER,
       progress: {
         exported: 42,
@@ -188,25 +203,39 @@ describe("mergeState", () => {
     expect(result.progress.exported).toEqual({});
   });
 
-  it("ensures kfExported/kfPending/kfDead are arrays", () => {
+  it("ensures knowledgeFiles arrays are arrays", () => {
     const input = {
-      v: 2,
+      v: 3,
       ver: VER,
       progress: {
-        kfExported: "not-an-array",
-        kfPending: null,
-        kfDead: 42,
+        knowledgeFilesExported: "not-an-array",
+        knowledgeFilesPending: null,
+        knowledgeFilesDead: 42,
       },
     } as unknown as ExportState;
     const result = mergeState(input);
-    expect(Array.isArray(result.progress.kfExported)).toBe(true);
-    expect(Array.isArray(result.progress.kfPending)).toBe(true);
-    expect(Array.isArray(result.progress.kfDead)).toBe(true);
+    expect(Array.isArray(result.progress.knowledgeFilesExported)).toBe(true);
+    expect(Array.isArray(result.progress.knowledgeFilesPending)).toBe(true);
+    expect(Array.isArray(result.progress.knowledgeFilesDead)).toBe(true);
+  });
+
+  it("ensures file arrays are arrays", () => {
+    const input = {
+      v: 3,
+      ver: VER,
+      progress: {
+        filePending: "bad",
+        fileDead: null,
+      },
+    } as unknown as ExportState;
+    const result = mergeState(input);
+    expect(Array.isArray(result.progress.filePending)).toBe(true);
+    expect(Array.isArray(result.progress.fileDead)).toBe(true);
   });
 
   it("ensures projects is an array", () => {
     const input = {
-      v: 2,
+      v: 3,
       ver: VER,
       projects: "not-array",
     } as unknown as ExportState;
@@ -229,7 +258,7 @@ describe("mergeState", () => {
 
   it("sets logs to empty array if not an array", () => {
     const input = {
-      v: 2,
+      v: 3,
       ver: VER,
       logs: "not-an-array",
     } as unknown as ExportState;
@@ -250,21 +279,20 @@ describe("mergeState", () => {
   it("merges stats sub-fields", () => {
     const input: ExportState = {
       ...defaultState(),
-      stats: { ...defaultState().stats, batches: 10, chats: 200 },
+      stats: { ...defaultState().stats, chatsExported: 200, chatsMs: 50000 },
     };
     const result = mergeState(input);
-    expect(result.stats.batches).toBe(10);
-    expect(result.stats.chats).toBe(200);
+    expect(result.stats.chatsExported).toBe(200);
+    expect(result.stats.chatsMs).toBe(50000);
   });
 
   it("merges run sub-fields", () => {
     const input: ExportState = {
       ...defaultState(),
-      run: { ...defaultState().run, isRunning: true, lastPhase: "exporting" },
+      run: { ...defaultState().run, isRunning: true },
     };
     const result = mergeState(input);
     expect(result.run.isRunning).toBe(true);
-    expect(result.run.lastPhase).toBe("exporting");
   });
 
   it("merges changes sub-fields", () => {
@@ -278,15 +306,40 @@ describe("mergeState", () => {
   });
 
   it("handles missing settings gracefully", () => {
-    const input = { v: 2, ver: VER } as unknown as ExportState;
+    const input = { v: 3, ver: VER } as unknown as ExportState;
     const result = mergeState(input);
     expect(result.settings).toEqual(defaultState().settings);
   });
 
   it("handles missing progress gracefully", () => {
-    const input = { v: 2, ver: VER } as unknown as ExportState;
+    const input = { v: 3, ver: VER } as unknown as ExportState;
     const result = mergeState(input);
     expect(result.progress.exported).toEqual({});
     expect(result.progress.pending).toEqual([]);
+  });
+
+  it("migrates v2 state automatically", () => {
+    const input = {
+      v: 2,
+      ver: VER,
+      settings: { batch: 50, conc: 5, pause: 300, filterGizmoId: null },
+      progress: {
+        exported: {},
+        pending: [],
+        dead: [],
+        failCounts: {},
+        kfExported: [],
+        kfPending: [],
+        kfDead: [],
+        kfFailCounts: {},
+      },
+      stats: { batches: 10, batchMs: 5000, chats: 100, kfBatches: 2, kfMs: 1000, kfFiles: 20 },
+      run: { isRunning: false, startedAt: 0, stoppedAt: 0, lastError: "", backoffUntil: 0, backoffCount: 0, lastPhase: "idle" },
+    } as unknown as ExportState;
+    const result = mergeState(input);
+    expect(result.v).toBe(3);
+    expect(result.settings.chatConcurrency).toBe(5);
+    expect(result.stats.chatsExported).toBe(100);
+    expect(result.stats.chatsMs).toBe(5000);
   });
 });

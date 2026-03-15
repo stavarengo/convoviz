@@ -1,3 +1,7 @@
+import type { AttachmentItem } from "./export/attachment-worker";
+
+export type { AttachmentItem };
+
 export type TaskStatus = "queued" | "active" | "done" | "failed";
 
 export interface Task {
@@ -61,8 +65,9 @@ export interface KfDeadItem extends KfPendingItem {
 }
 
 export interface Settings {
-  batch: number;
-  conc: number;
+  chatConcurrency: number;
+  fileConcurrency: number;
+  knowledgeFileConcurrency: number;
   pause: number;
   filterGizmoId: string | null;
 }
@@ -72,10 +77,14 @@ export interface Progress {
   pending: PendingItem[];
   dead: DeadItem[];
   failCounts: Record<string, number>;
-  kfExported: KfPendingItem[];
-  kfPending: KfPendingItem[];
-  kfDead: KfDeadItem[];
-  kfFailCounts: Record<string, number>;
+  filePending: AttachmentItem[];
+  fileDead: Array<AttachmentItem & { lastError: string }>;
+  fileFailCounts: Record<string, number>;
+  fileDoneCount: number;
+  knowledgeFilesExported: KfPendingItem[];
+  knowledgeFilesPending: KfPendingItem[];
+  knowledgeFilesDead: KfDeadItem[];
+  knowledgeFilesFailCounts: Record<string, number>;
 }
 
 export interface ScanState {
@@ -92,16 +101,15 @@ export interface RunState {
   lastError: string;
   backoffUntil: number;
   backoffCount: number;
-  lastPhase: string;
 }
 
 export interface Stats {
-  batches: number;
-  batchMs: number;
-  chats: number;
-  kfBatches: number;
-  kfMs: number;
-  kfFiles: number;
+  chatsExported: number;
+  chatsMs: number;
+  filesDownloaded: number;
+  filesMs: number;
+  knowledgeFilesDownloaded: number;
+  knowledgeFilesMs: number;
 }
 
 export interface Changes {

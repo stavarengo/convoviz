@@ -47,11 +47,17 @@ describe("createUI", () => {
       const panel = document.getElementById("cvz-resume-ui");
       expect(panel).not.toBeNull();
       expect(document.getElementById("cvz-status")).not.toBeNull();
-      expect(document.getElementById("cvz-bar")).not.toBeNull();
       expect(document.getElementById("cvz-log")).not.toBeNull();
       expect(document.getElementById("cvz-tasks")).not.toBeNull();
-      expect(document.getElementById("cvz-batch")).not.toBeNull();
       expect(document.getElementById("cvz-max")).not.toBeNull();
+      // Per-queue concurrency inputs
+      expect(document.getElementById("cvz-conc-chat")).not.toBeNull();
+      expect(document.getElementById("cvz-conc-file")).not.toBeNull();
+      expect(document.getElementById("cvz-conc-kf")).not.toBeNull();
+      // Per-queue stats rows
+      expect(document.getElementById("cvz-chat-bar")).not.toBeNull();
+      expect(document.getElementById("cvz-file-bar")).not.toBeNull();
+      expect(document.getElementById("cvz-kf-bar")).not.toBeNull();
     });
 
     it("does not inject duplicate panels", () => {
@@ -82,13 +88,23 @@ describe("createUI", () => {
       expect(styleEl!.textContent).toContain("cvz-spin");
     });
 
-    it("sets batch input to S.settings.batch", () => {
+    it("sets per-queue concurrency inputs from settings", () => {
       const deps = makeDeps();
-      deps.S.settings.batch = 75;
+      deps.S.settings.chatConcurrency = 5;
+      deps.S.settings.fileConcurrency = 4;
+      deps.S.settings.knowledgeFileConcurrency = 2;
       const ui = createUI(deps);
       ui.inject();
-      const batchEl = document.getElementById("cvz-batch") as HTMLInputElement;
-      expect(batchEl.value).toBe("75");
+      expect((document.getElementById("cvz-conc-chat") as HTMLInputElement).value).toBe("5");
+      expect((document.getElementById("cvz-conc-file") as HTMLInputElement).value).toBe("4");
+      expect((document.getElementById("cvz-conc-kf") as HTMLInputElement).value).toBe("2");
+    });
+
+    it("does not have old batch input", () => {
+      const deps = makeDeps();
+      const ui = createUI(deps);
+      ui.inject();
+      expect(document.getElementById("cvz-batch")).toBeNull();
     });
   });
 
@@ -103,24 +119,34 @@ describe("createUI", () => {
     });
   });
 
-  describe("setBar(pct)", () => {
-    it("updates #cvz-bar width style", () => {
+  describe("per-queue progress bars", () => {
+    it("chat bar reflects exported/total percentage", () => {
       const deps = makeDeps();
+      deps.S.progress.exported = { a: 1, b: 2, c: 3 };
+      deps.S.scan.total = 12;
       const ui = createUI(deps);
       ui.inject();
-      ui.setBar(42.567);
-      const el = document.getElementById("cvz-bar")!;
-      expect(el.style.width).toBe("42.6%");
+      ui.renderAll();
+      const el = document.getElementById("cvz-chat-bar")!;
+      expect(parseFloat(el.style.width)).toBe(25);
     });
 
-    it("clamps to 0-100", () => {
+    it("knowledge bar reflects exported/(exported+pending+dead) percentage", () => {
       const deps = makeDeps();
+      deps.S.progress.knowledgeFilesExported = [
+        { projectId: "p1", projectName: "P1", fileId: "f1", fileName: "a.txt", fileType: "text", fileSize: 10 },
+        { projectId: "p1", projectName: "P1", fileId: "f2", fileName: "b.txt", fileType: "text", fileSize: 10 },
+      ];
+      deps.S.progress.knowledgeFilesPending = [
+        { projectId: "p1", projectName: "P1", fileId: "f3", fileName: "c.txt", fileType: "text", fileSize: 10 },
+        { projectId: "p1", projectName: "P1", fileId: "f4", fileName: "d.txt", fileType: "text", fileSize: 10 },
+      ];
+      deps.S.progress.knowledgeFilesDead = [];
       const ui = createUI(deps);
       ui.inject();
-      ui.setBar(-10);
-      expect(parseFloat(document.getElementById("cvz-bar")!.style.width)).toBe(0);
-      ui.setBar(150);
-      expect(parseFloat(document.getElementById("cvz-bar")!.style.width)).toBe(100);
+      ui.renderAll();
+      const el = document.getElementById("cvz-kf-bar")!;
+      expect(parseFloat(el.style.width)).toBe(50);
     });
   });
 
@@ -150,7 +176,7 @@ describe("createUI", () => {
   });
 
   describe("renderAll()", () => {
-    it("reflects correct exported/pending/dead counts from state", () => {
+    it("reflects correct chat exported/total and dead counts from state", () => {
       const deps = makeDeps();
       deps.S.progress.exported = { a: 1, b: 2, c: 3 };
       deps.S.progress.pending = [
@@ -163,65 +189,81 @@ describe("createUI", () => {
       const ui = createUI(deps);
       ui.inject();
       ui.renderAll();
-      expect(document.getElementById("cvz-exported")!.textContent).toBe("3");
-      expect(document.getElementById("cvz-pending")!.textContent).toBe("2");
-      expect(document.getElementById("cvz-dead")!.textContent).toBe("1");
+      // Chat row: 3 exported out of 3+2=5
+      expect(document.getElementById("cvz-chat-count")!.textContent).toContain("3/5");
+      expect(document.getElementById("cvz-chat-dead")!.textContent).toBe("1");
     });
 
-    it("computes progress bar from exported vs total", () => {
+    it("computes chat progress bar from exported vs total", () => {
       const deps = makeDeps();
       deps.S.progress.exported = { a: 1, b: 2 };
       deps.S.scan.total = 10;
       const ui = createUI(deps);
       ui.inject();
       ui.renderAll();
-      expect(parseFloat(document.getElementById("cvz-bar")!.style.width)).toBe(20);
+      expect(parseFloat(document.getElementById("cvz-chat-bar")!.style.width)).toBe(20);
     });
 
-    it("disables batch input when running", () => {
+    it("shows per-queue stats with correct counts", () => {
       const deps = makeDeps();
-      deps.S.run.isRunning = true;
-      const ui = createUI(deps);
-      ui.inject();
-      ui.renderAll();
-      const batchEl = document.getElementById("cvz-batch") as HTMLInputElement;
-      expect(batchEl.disabled).toBe(true);
-    });
-
-    it("shows project count", () => {
-      const deps = makeDeps();
-      deps.S.projects = [
-        {
-          gizmoId: "g1",
-          name: "Project 1",
-          emoji: "",
-          theme: "",
-          instructions: "",
-          memoryEnabled: false,
-          memoryScope: "",
-          files: [],
-          raw: {},
-        },
+      deps.S.progress.exported = { a: 1, b: 2, c: 3 };
+      deps.S.scan.total = 10;
+      deps.S.progress.fileDoneCount = 12;
+      deps.S.progress.fileDead = [
+        { id: "x", name: null, conversationId: "c1", conversationTitle: "C1", lastError: "err" },
       ];
-      const ui = createUI(deps);
-      ui.inject();
-      ui.renderAll();
-      expect(document.getElementById("cvz-projects")!.textContent).toBe("1");
-    });
-
-    it("shows knowledge file counts", () => {
-      const deps = makeDeps();
-      deps.S.progress.kfExported = [
+      deps.S.progress.knowledgeFilesExported = [
         { projectId: "p1", projectName: "P1", fileId: "f1", fileName: "a.txt", fileType: "text", fileSize: 10 },
       ];
-      deps.S.progress.kfPending = [
+      deps.S.progress.knowledgeFilesPending = [
         { projectId: "p1", projectName: "P1", fileId: "f2", fileName: "b.txt", fileType: "text", fileSize: 20 },
       ];
-      deps.S.progress.kfDead = [];
+      deps.S.progress.knowledgeFilesDead = [];
       const ui = createUI(deps);
       ui.inject();
       ui.renderAll();
-      expect(document.getElementById("cvz-kf-count")!.textContent).toBe("1/2");
+      // Chat row
+      expect(document.getElementById("cvz-chat-count")!.textContent).toContain("3");
+      // File row
+      expect(document.getElementById("cvz-file-count")!.textContent).toContain("12");
+      expect(document.getElementById("cvz-file-dead")!.textContent).toBe("1");
+      // KF row
+      expect(document.getElementById("cvz-kf-count")!.textContent).toContain("1");
+    });
+
+    it("shows knowledge file counts in kf row", () => {
+      const deps = makeDeps();
+      deps.S.progress.knowledgeFilesExported = [
+        { projectId: "p1", projectName: "P1", fileId: "f1", fileName: "a.txt", fileType: "text", fileSize: 10 },
+        { projectId: "p1", projectName: "P1", fileId: "f2", fileName: "b.txt", fileType: "text", fileSize: 10 },
+      ];
+      deps.S.progress.knowledgeFilesPending = [
+        { projectId: "p1", projectName: "P1", fileId: "f3", fileName: "c.txt", fileType: "text", fileSize: 20 },
+      ];
+      deps.S.progress.knowledgeFilesDead = [
+        { projectId: "p1", projectName: "P1", fileId: "f4", fileName: "d.txt", fileType: "text", fileSize: 30, lastError: "err" },
+      ];
+      const ui = createUI(deps);
+      ui.inject();
+      ui.renderAll();
+      // 2 exported out of 4 total
+      expect(document.getElementById("cvz-kf-count")!.textContent).toBe("2/4");
+      expect(document.getElementById("cvz-kf-dead")!.textContent).toBe("1");
+    });
+
+    it("shows file download counts in file row", () => {
+      const deps = makeDeps();
+      deps.S.progress.fileDoneCount = 42;
+      deps.S.progress.filePending = [
+        { id: "f1", name: "test.png", conversationId: "c1", conversationTitle: "C1" },
+      ];
+      deps.S.progress.fileDead = [];
+      const ui = createUI(deps);
+      ui.inject();
+      ui.renderAll();
+      // 42 done out of 42+1=43 total
+      expect(document.getElementById("cvz-file-count")!.textContent).toBe("42/43");
+      expect(document.getElementById("cvz-file-dead")!.textContent).toBe("0");
     });
 
     it("calls TaskList.render()", () => {
@@ -341,7 +383,7 @@ describe("createUI", () => {
       expect(deps.onDownload).toHaveBeenCalled();
     });
 
-    it("is disabled when export is running", async () => {
+    it("is enabled even when export is running (download what's ready)", async () => {
       const deps = makeDeps();
       deps.getAccumulatedSize.mockResolvedValue(5 * 1024 * 1024);
       deps.S.run.isRunning = true;
@@ -349,7 +391,7 @@ describe("createUI", () => {
       ui.inject();
       await ui.updateDownloadButton();
       const btn = document.getElementById("cvz-download") as HTMLButtonElement;
-      expect(btn.disabled).toBe(true);
+      expect(btn.disabled).toBe(false);
     });
 
     it("is enabled when export is not running", async () => {
@@ -361,6 +403,78 @@ describe("createUI", () => {
       await ui.updateDownloadButton();
       const btn = document.getElementById("cvz-download") as HTMLButtonElement;
       expect(btn.disabled).toBe(false);
+    });
+  });
+
+  describe("per-queue concurrency inputs", () => {
+    it("updates chatConcurrency setting when chat concurrency input changes", () => {
+      const deps = makeDeps();
+      const ui = createUI(deps);
+      ui.inject();
+      const input = document.getElementById("cvz-conc-chat") as HTMLInputElement;
+      input.value = "5";
+      input.dispatchEvent(new Event("change"));
+      expect(deps.S.settings.chatConcurrency).toBe(5);
+      expect(deps.saveDebounce).toHaveBeenCalledWith(true);
+    });
+
+    it("updates fileConcurrency setting when file concurrency input changes", () => {
+      const deps = makeDeps();
+      const ui = createUI(deps);
+      ui.inject();
+      const input = document.getElementById("cvz-conc-file") as HTMLInputElement;
+      input.value = "6";
+      input.dispatchEvent(new Event("change"));
+      expect(deps.S.settings.fileConcurrency).toBe(6);
+      expect(deps.saveDebounce).toHaveBeenCalledWith(true);
+    });
+
+    it("updates knowledgeFileConcurrency setting when knowledge concurrency input changes", () => {
+      const deps = makeDeps();
+      const ui = createUI(deps);
+      ui.inject();
+      const input = document.getElementById("cvz-conc-kf") as HTMLInputElement;
+      input.value = "4";
+      input.dispatchEvent(new Event("change"));
+      expect(deps.S.settings.knowledgeFileConcurrency).toBe(4);
+      expect(deps.saveDebounce).toHaveBeenCalledWith(true);
+    });
+
+    it("calls setConcurrency on the respective queue when running and input changes", () => {
+      const deps = makeDeps();
+      deps.S.run.isRunning = true;
+      const ui = createUI(deps) as any;
+      ui.inject();
+      const mockQueue = { setConcurrency: vi.fn() };
+      ui.setExporter({
+        scanPromise: null,
+        start: vi.fn(),
+        stop: vi.fn(),
+        rescan: vi.fn(),
+        chatQueue: mockQueue,
+        attachmentQueue: { setConcurrency: vi.fn() },
+        knowledgeQueue: { setConcurrency: vi.fn() },
+      });
+      const input = document.getElementById("cvz-conc-chat") as HTMLInputElement;
+      input.value = "7";
+      input.dispatchEvent(new Event("change"));
+      expect(mockQueue.setConcurrency).toHaveBeenCalledWith(7);
+    });
+
+    it("clamps concurrency values to 1-10 range", () => {
+      const deps = makeDeps();
+      const ui = createUI(deps);
+      ui.inject();
+      const input = document.getElementById("cvz-conc-chat") as HTMLInputElement;
+      input.value = "99";
+      input.dispatchEvent(new Event("change"));
+      expect(deps.S.settings.chatConcurrency).toBe(10);
+      expect(input.value).toBe("10");
+
+      input.value = "0";
+      input.dispatchEvent(new Event("change"));
+      expect(deps.S.settings.chatConcurrency).toBe(1);
+      expect(input.value).toBe("1");
     });
   });
 

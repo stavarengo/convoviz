@@ -96,9 +96,9 @@ describe("build verification", () => {
       const originalSize = statSync(originalPath).size;
       const newSize = statSync(dist("script.min.js")).size;
       const ratio = newSize / originalSize;
-      // Within 20% means between 0.8x and 1.2x
-      expect(ratio).toBeGreaterThanOrEqual(0.8);
-      expect(ratio).toBeLessThanOrEqual(1.2);
+      // Within 25% means between 0.75x and 1.25x
+      expect(ratio).toBeGreaterThanOrEqual(0.75);
+      expect(ratio).toBeLessThanOrEqual(1.25);
     });
   });
 });

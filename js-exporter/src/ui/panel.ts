@@ -41,12 +41,33 @@ export interface UI {
   updateDownloadButton(): Promise<void>;
 }
 
+interface QueueRef {
+  setConcurrency(n: number): void;
+}
+
 export interface ExporterRef {
   scanPromise: Promise<unknown> | null;
   start(): void;
   stop(): void;
   rescan(full?: boolean): void;
+  chatQueue?: QueueRef | null;
+  attachmentQueue?: QueueRef | null;
+  knowledgeQueue?: QueueRef | null;
 }
+
+const _barStyle = "height:100%;width:0%;border-radius:999px;transition:width 0.3s;";
+const _barTrackStyle = "flex:1;height:5px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;min-width:40px;";
+const _inputStyle = "width:36px;padding:3px 4px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;text-align:center;font-size:11px;";
+
+const _statsRow = (label: string, prefix: string, barColor: string): string =>
+  '<div style="display:flex;gap:8px;align-items:center;font-size:11px;margin-bottom:3px;">' +
+  '<span style="width:72px;text-align:right;opacity:0.8;">' + label + '</span>' +
+  '<span id="cvz-' + prefix + '-count" style="width:80px;font-variant-numeric:tabular-nums;">0</span>' +
+  '<div style="' + _barTrackStyle + '">' +
+  '<div id="cvz-' + prefix + '-bar" style="' + _barStyle + 'background:' + barColor + ';"></div>' +
+  '</div>' +
+  '<span style="opacity:0.6;font-size:10px;">Dead: <span id="cvz-' + prefix + '-dead">0</span></span>' +
+  '</div>';
 
 export const createUI = (deps: UIDeps): UI => {
   const { S, addLog, net, taskList, saveDebounce } = deps;
@@ -137,6 +158,38 @@ export const createUI = (deps: UIDeps): UI => {
     _populateProjectSelect();
   };
 
+  const _setupConcInput = (
+    d: HTMLElement,
+    inputId: string,
+    settingKey: "chatConcurrency" | "fileConcurrency" | "knowledgeFileConcurrency",
+    queueKey: "chatQueue" | "attachmentQueue" | "knowledgeQueue",
+    label: string,
+  ): void => {
+    const el = d.querySelector("#" + inputId) as HTMLInputElement;
+    el.value = String(S.settings[settingKey] || 3);
+    el.addEventListener("change", () => {
+      const n = parseInt(el.value, 10);
+      const clamped = clamp(isFinite(n) ? n : 3, 1, 10);
+      S.settings[settingKey] = clamped;
+      el.value = String(clamped);
+      // Call setConcurrency on the live queue if running
+      if (_exporter) {
+        const q = _exporter[queueKey];
+        if (q) q.setConcurrency(clamped);
+      }
+      addLog(label + " concurrency set to " + clamped + ".");
+      saveDebounce(true);
+      ui.renderAll();
+    });
+  };
+
+  const _setBarWidth = (id: string, pct: number): void => {
+    const el =
+      ui.container &&
+      (ui.container.querySelector("#" + id) as HTMLElement | null);
+    if (el) el.style.width = clamp(pct || 0, 0, 100).toFixed(1) + "%";
+  };
+
   const ui: UI & {
     _exporter: ExporterRef | null;
     setExporter(e: ExporterRef): void;
@@ -159,7 +212,7 @@ export const createUI = (deps: UIDeps): UI => {
       if (size > 0) {
         btn.style.display = "";
         btn.textContent = "Download (" + fmtSize(size) + ")";
-        btn.disabled = !!S.run.isRunning;
+        btn.disabled = false;
       } else {
         btn.style.display = "none";
       }
@@ -196,28 +249,26 @@ export const createUI = (deps: UIDeps): UI => {
           ? " \u00b7 \u26A0 localStorage fallback \u2014 large exports may lose state"
           : " \u00b7 state in IndexedDB") +
         "</div>" +
+        // Per-queue stats area
         '<div data-testid="cvz-stats" style="margin-top:10px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">' +
-        '<div style="display:flex;gap:10px;align-items:center;font-size:12px;">' +
-        '<div><b>Exported:</b> <span id="cvz-exported">0</span></div>' +
-        '<div>\u00b7</div>' +
-        '<div><b>Pending:</b> <span id="cvz-pending">0</span></div>' +
-        '<div>\u00b7</div>' +
-        '<div><b>Dead:</b> <span id="cvz-dead">0</span></div>' +
-        '<div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:999px;overflow:hidden;min-width:40px;">' +
-        '<div id="cvz-bar" style="height:100%;width:0%;background:#10a37f;"></div>' +
-        "</div>" +
-        "</div>" +
-        '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin-top:4px;">' +
-        '<div><b>Projects:</b> <span id="cvz-projects">0</span></div>' +
-        '<div>\u00b7</div>' +
-        '<div><b>KF:</b> <span id="cvz-kf-count">0/0</span></div>' +
-        '<div>\u00b7</div>' +
+        _statsRow("Chats:", "chat", "#10a37f") +
+        _statsRow("Files:", "file", "#3b82f6") +
+        _statsRow("Knowledge:", "kf", "#a855f7") +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px;margin-top:4px;justify-content:flex-end;">' +
         '<div><b>Accumulated:</b> <span id="cvz-accumulated">0 B</span></div>' +
         "</div>" +
         "</div>" +
+        // Controls area: Workers + buttons
         '<div data-testid="cvz-controls" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
-        '<label style="font-size:11px;opacity:0.9;">Batch</label>' +
-        '<input id="cvz-batch" type="number" min="1" max="500" style="width:60px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;" />' +
+        '<span style="font-size:11px;opacity:0.9;">Workers:</span>' +
+        '<label style="font-size:10px;opacity:0.7;">Chats</label>' +
+        '<input id="cvz-conc-chat" type="number" min="1" max="10" style="' + _inputStyle + '" />' +
+        '<label style="font-size:10px;opacity:0.7;">Files</label>' +
+        '<input id="cvz-conc-file" type="number" min="1" max="10" style="' + _inputStyle + '" />' +
+        '<label style="font-size:10px;opacity:0.7;">KF</label>' +
+        '<input id="cvz-conc-kf" type="number" min="1" max="10" style="' + _inputStyle + '" />' +
+        "</div>" +
+        '<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
         '<button id="cvz-rescan" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;">Rescan</button>' +
         '<button id="cvz-start" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(16,163,127,0.6);background:rgba(16,163,127,0.15);color:#ececf1;cursor:pointer;font-weight:600;">Start</button>' +
         '<button id="cvz-stop" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.14);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-weight:600;">Stop</button>' +
@@ -302,21 +353,10 @@ export const createUI = (deps: UIDeps): UI => {
         net.download(blob, "convoviz_export_state.json");
       });
 
-      const batchEl = d.querySelector("#cvz-batch") as HTMLInputElement;
-      batchEl.value = String(S.settings.batch || 50);
-      batchEl.addEventListener("change", () => {
-        const n = parseInt(batchEl.value, 10);
-        if (S.run.isRunning) {
-          batchEl.value = String(S.settings.batch || 50);
-          addLog("Stop first to change batch size.");
-          return;
-        }
-        S.settings.batch = clamp(isFinite(n) ? n : 50, 1, 500);
-        batchEl.value = String(S.settings.batch);
-        addLog("Batch size set to " + S.settings.batch + ".");
-        saveDebounce(true);
-        ui.renderAll();
-      });
+      // Per-queue concurrency inputs
+      _setupConcInput(d, "cvz-conc-chat", "chatConcurrency", "chatQueue", "Chat");
+      _setupConcInput(d, "cvz-conc-file", "fileConcurrency", "attachmentQueue", "File");
+      _setupConcInput(d, "cvz-conc-kf", "knowledgeFileConcurrency", "knowledgeQueue", "Knowledge");
 
       const singleProjCheck = d.querySelector(
         "#cvz-single-proj",
@@ -377,11 +417,7 @@ export const createUI = (deps: UIDeps): UI => {
     },
 
     setBar(pct: number): void {
-      const el =
-        ui.container &&
-        (ui.container.querySelector("#cvz-bar") as HTMLElement | null);
-      if (el)
-        el.style.width = clamp(pct || 0, 0, 100).toFixed(1) + "%";
+      _setBarWidth("cvz-chat-bar", pct);
     },
 
     renderLogs(): void {
@@ -404,29 +440,47 @@ export const createUI = (deps: UIDeps): UI => {
       const dead = (S.progress.dead || []).length;
       const scanning = !!(_exporter && _exporter.scanPromise);
 
-      ui.container.querySelector("#cvz-exported")!.textContent =
-        String(exported);
-      ui.container.querySelector("#cvz-pending")!.textContent = scanning
-        ? pending + "\u2026"
-        : String(pending);
-      ui.container.querySelector("#cvz-dead")!.textContent = String(dead);
+      // Chat row
+      const chatTotal = S.scan.total ? S.scan.total : exported + pending;
+      const chatLabel = scanning
+        ? exported + "/" + chatTotal + "\u2026"
+        : exported + "/" + chatTotal;
+      const chatEl = ui.container.querySelector("#cvz-chat-count");
+      if (chatEl) chatEl.textContent = chatLabel;
+      const chatDeadEl = ui.container.querySelector("#cvz-chat-dead");
+      if (chatDeadEl) chatDeadEl.textContent = String(dead);
+      const chatPct = chatTotal ? (exported / chatTotal) * 100 : 0;
+      _setBarWidth("cvz-chat-bar", chatPct);
 
-      const batchEl = ui.container.querySelector(
-        "#cvz-batch",
-      ) as HTMLInputElement | null;
-      if (batchEl) batchEl.disabled = !!S.run.isRunning;
+      // File row
+      const fileDone = S.progress.fileDoneCount || 0;
+      const filePending = (S.progress.filePending || []).length;
+      const fileDead = (S.progress.fileDead || []).length;
+      const fileTotal = fileDone + filePending + fileDead;
+      const fileLabel = fileTotal
+        ? fileDone + "/" + fileTotal
+        : String(fileDone);
+      const fileEl = ui.container.querySelector("#cvz-file-count");
+      if (fileEl) fileEl.textContent = fileLabel;
+      const fileDeadEl = ui.container.querySelector("#cvz-file-dead");
+      if (fileDeadEl) fileDeadEl.textContent = String(fileDead);
+      const filePct = fileTotal ? (fileDone / fileTotal) * 100 : 0;
+      _setBarWidth("cvz-file-bar", filePct);
 
-      const projectCount =
-        (S.projects || []).length || S.scan.totalProjects || 0;
-      ui.container.querySelector("#cvz-projects")!.textContent =
-        String(projectCount);
-
-      const kfExp = (S.progress.kfExported || []).length;
-      const kfPend = (S.progress.kfPending || []).length;
-      const kfTotal =
-        kfExp + kfPend + (S.progress.kfDead || []).length;
-      ui.container.querySelector("#cvz-kf-count")!.textContent =
-        kfExp + "/" + kfTotal;
+      // Knowledge row
+      const kfExp = (S.progress.knowledgeFilesExported || []).length;
+      const kfPend = (S.progress.knowledgeFilesPending || []).length;
+      const kfDead = (S.progress.knowledgeFilesDead || []).length;
+      const kfTotal = kfExp + kfPend + kfDead;
+      const kfLabel = kfTotal
+        ? kfExp + "/" + kfTotal
+        : String(kfExp);
+      const kfEl = ui.container.querySelector("#cvz-kf-count");
+      if (kfEl) kfEl.textContent = kfLabel;
+      const kfDeadEl = ui.container.querySelector("#cvz-kf-dead");
+      if (kfDeadEl) kfDeadEl.textContent = String(kfDead);
+      const kfPct = kfTotal ? (kfExp / kfTotal) * 100 : 0;
+      _setBarWidth("cvz-kf-bar", kfPct);
 
       const singleCheck = ui.container.querySelector(
         "#cvz-single-proj",
@@ -438,11 +492,6 @@ export const createUI = (deps: UIDeps): UI => {
 
       ui.renderLogs();
       ui.updateDownloadButton();
-
-      const done = exported;
-      const tot = S.scan.total ? S.scan.total : exported + pending;
-      const pct = tot ? (done / tot) * 100 : 0;
-      ui.setBar(pct);
       taskList.render();
     },
 

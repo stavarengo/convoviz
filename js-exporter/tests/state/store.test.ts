@@ -27,8 +27,9 @@ describe("Store with IndexedDB", () => {
     const state = {
       ...defaultState(),
       settings: {
-        batch: 100,
-        conc: 5,
+        chatConcurrency: 5,
+        fileConcurrency: 4,
+        knowledgeFileConcurrency: 2,
         pause: 500,
         filterGizmoId: "g1" as string | null,
       },
@@ -36,8 +37,8 @@ describe("Store with IndexedDB", () => {
     };
     await Store.save(state);
     const loaded = await Store.load();
-    expect(loaded.settings.batch).toBe(100);
-    expect(loaded.settings.conc).toBe(5);
+    expect(loaded.settings.chatConcurrency).toBe(5);
+    expect(loaded.settings.fileConcurrency).toBe(4);
     expect(loaded.logs).toEqual(["log1", "log2"]);
   });
 
@@ -130,14 +131,14 @@ describe("Store with localStorage fallback", () => {
       const { defaultState, KEY } = await import("../../src/state/defaults");
       await initIdb();
 
-      // Store partial state in localStorage
+      // Store partial v2 state in localStorage - will be migrated to v3
       localStorage.setItem(
         KEY,
-        JSON.stringify({ v: 2, ver: "old", settings: { batch: 77 } }),
+        JSON.stringify({ v: 2, ver: "old", settings: { batch: 77, conc: 5 } }),
       );
       const loaded = await Store.load();
-      expect(loaded.settings.batch).toBe(77);
-      expect(loaded.settings.conc).toBe(3); // merged from defaults
+      expect(loaded.settings.chatConcurrency).toBe(5); // mapped from conc
+      expect(loaded.settings.fileConcurrency).toBe(3); // default
     } finally {
       indexedDB.open = origOpen;
     }

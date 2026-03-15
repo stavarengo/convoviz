@@ -2,6 +2,8 @@ import type { ExportState } from "../types";
 import { safeJsonParse } from "../utils/format";
 import { KEY, defaultState, mergeState } from "./defaults";
 
+export { migrateV2toV3 } from "./migrate";
+
 const IDB_NAME = "cvz-export";
 const IDB_STORE = "state";
 const IDB_KEY = "state";

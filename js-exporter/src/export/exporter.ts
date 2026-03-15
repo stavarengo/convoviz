@@ -11,8 +11,13 @@ import type {
 import type { Net } from "../net/net";
 import type { UI } from "../ui/panel";
 import type { TaskList } from "../ui/task-list";
+import type { AttachmentItem } from "./attachment-worker";
+import { createQueue } from "./queue";
+import type { Queue } from "./queue";
+import { createChatWorker } from "./chat-worker";
+import { createAttachmentWorker } from "./attachment-worker";
+import { createKnowledgeWorker } from "./knowledge-worker";
 import { now, clamp, fmtMs } from "../utils/format";
-import { sanitizeName } from "../utils/sanitize";
 import { sleep } from "../net/sleep";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -28,6 +33,7 @@ interface ScanNet {
 export interface ExportBlobStoreApi {
   putConv(id: string, json: string): Promise<void>;
   putFile(path: string, blob: Blob): Promise<void>;
+  hasFilePrefix(prefix: string): Promise<boolean>;
   totalSize(): Promise<number>;
 }
 
@@ -77,11 +83,12 @@ export interface Exporter {
   _scanAbort: AbortController | null;
   stopRequested: boolean;
   scanPromise: Promise<unknown> | null;
+  chatQueue: Queue<PendingItem> | null;
+  attachmentQueue: Queue<AttachmentItem> | null;
+  knowledgeQueue: Queue<any> | null;
   rescan(force: boolean): Promise<void>;
   start(): Promise<void>;
   stop(): void;
-  exportOneBatch(signal: AbortSignal): Promise<void>;
-  exportKnowledgeBatch(signal: AbortSignal): Promise<void>;
 }
 
 export const createExporter = (deps: ExporterDeps): Exporter => {
@@ -106,6 +113,9 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
     _scanAbort: null,
     stopRequested: false,
     scanPromise: null,
+    chatQueue: null,
+    attachmentQueue: null,
+    knowledgeQueue: null,
 
     async rescan(force: boolean): Promise<void> {
       if (S.run.isRunning && !force) {
@@ -125,7 +135,6 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
             label: "Scanning conversations and projects\u2026",
             status: "active",
           });
-          S.run.lastPhase = "scan";
           S.scan.total = 0;
           S.scan.totalProjects = 0;
           S.changes = {
@@ -294,10 +303,10 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
           }
 
           const kfExportedSet = new Set(
-            (S.progress.kfExported || []).map((x) => x.fileId),
+            (S.progress.knowledgeFilesExported || []).map((x) => x.fileId),
           );
           const kfDeadSet = new Set(
-            (S.progress.kfDead || []).map((x) => x.fileId),
+            (S.progress.knowledgeFilesDead || []).map((x) => x.fileId),
           );
           const kfPendingNew: KfPendingItem[] = [];
           const kfPendingIds = new Set<string>();
@@ -320,7 +329,7 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
               }
             }
           }
-          S.progress.kfPending = kfPendingNew;
+          S.progress.knowledgeFilesPending = kfPendingNew;
           saveDebounce(false);
           if (kfPendingNew.length)
             addLog(
@@ -394,7 +403,6 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
         } finally {
           exporter._scanAbort = null;
           exporter.scanPromise = null;
-          S.run.lastPhase = "idle";
           saveDebounce(false);
         }
       })();
@@ -414,7 +422,6 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
         if (ui && ui.ensureTick) ui.ensureTick();
         S.run.lastError = "";
         S.run.startedAt = now();
-        S.run.lastPhase = "prepare";
         saveDebounce(true);
         ui.renderAll();
         addLog("Start.");
@@ -444,8 +451,20 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
           );
           await sleep(wait, ac.signal);
         }
+
+        // Wait for scan to complete if it's running
+        if (exporter.scanPromise) {
+          ui.setStatus("Waiting for scan to find conversations\u2026");
+          await exporter.scanPromise;
+        }
+
+        if (exporter.stopRequested || ac.signal.aborted) {
+          ui.setStatus("Paused.");
+          addLog("Stopped.");
+          return;
+        }
+
         S.run.isRunning = true;
-        S.run.lastPhase = "run";
         saveDebounce(true);
         ui.renderAll();
 
@@ -461,52 +480,423 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
         }
         ui.setStatus("Running\u2026");
 
-        const _eligibleConvs = (): number => {
-          return filterGid
-            ? S.progress.pending.filter(
-                (x) => x.gizmo_id === filterGid,
-              ).length
-            : S.progress.pending.length;
-        };
-        const _eligibleKf = (): number => {
-          return filterGid
-            ? (S.progress.kfPending || []).filter(
-                (x) => x.projectId === filterGid,
-              ).length
-            : (S.progress.kfPending || []).length;
+        const pause = clamp(
+          parseInt(String(S.settings.pause), 10) || 300,
+          0,
+          5000,
+        );
+
+        // Coordinator: resolves when all work is done
+        let resolveCoordinator: (() => void) | null = null;
+        const coordinatorPromise = new Promise<void>((resolve) => {
+          resolveCoordinator = resolve;
+        });
+
+        let chatDrained = false;
+        let knowledgeDrained = false;
+        let attachmentDrained = false;
+
+        const checkCompletion = (): void => {
+          // Attachment queue is drained only if it has truly finished:
+          // either it never received items, or all received items have been processed
+          const attStats = _attachmentQueue.stats;
+          const attIdle = attStats.pending === 0 && attStats.active === 0;
+
+          if (chatDrained && attIdle) {
+            // Chat done, no pending files: attachment is truly done
+            attachmentDrained = true;
+          }
+
+          if (chatDrained && knowledgeDrained && attachmentDrained) {
+            // Stop attachment queue if still running (it may be parked waiting)
+            if (_attachmentQueue.isRunning) {
+              _attachmentQueue.stop();
+            }
+            if (resolveCoordinator) {
+              const r = resolveCoordinator;
+              resolveCoordinator = null;
+              r();
+            }
+          } else if (chatDrained && !attachmentDrained) {
+            ui.setStatus("Chats done. Files still downloading\u2026");
+          }
         };
 
-        while (S.run.isRunning) {
-          if (!_eligibleConvs() && exporter.scanPromise) {
-            ui.setStatus(
-              "Waiting for scan to find conversations\u2026",
-            );
-            await sleep(500, ac.signal);
-            continue;
-          }
-          if (!_eligibleConvs() || exporter.stopRequested)
-            break;
-          await exporter.exportOneBatch(ac.signal);
-          if (exporter.stopRequested) break;
-        }
-        if (!exporter.stopRequested && _eligibleKf()) {
-          addLog(
-            "Conversations done. Starting knowledge file export\u2026",
-          );
-          while (S.run.isRunning) {
-            if (!_eligibleKf() || exporter.stopRequested)
-              break;
-            await exporter.exportKnowledgeBatch(ac.signal);
-            if (exporter.stopRequested) break;
-          }
-        }
-        const anyPending = _eligibleConvs() || _eligibleKf();
-        ui.setStatus(
-          anyPending ? "Paused." : "\u2705 All done.",
+        // Create attachment queue first (chat worker needs it)
+        const _attachmentQueue = createQueue<AttachmentItem>(
+          {
+            name: "attachment",
+            concurrency: clamp(
+              parseInt(String(S.settings.fileConcurrency), 10) || 3,
+              1,
+              8,
+            ),
+            maxRetries: 3,
+            pauseMs: pause,
+            worker: createAttachmentWorker({
+              net,
+              exportBlobStore,
+            }),
+          },
+          {
+            onItemDone: (item) => {
+              S.progress.fileDoneCount = (S.progress.fileDoneCount || 0) + 1;
+              S.stats.filesDownloaded = (S.stats.filesDownloaded || 0) + 1;
+              taskList.update("file-" + item.id, { status: "done", detail: null });
+              saveDebounce(false);
+              ui.renderAll();
+            },
+            onItemFailed: (item, error, attempt) => {
+              S.progress.fileFailCounts[item.id] = attempt;
+              taskList.update("file-" + item.id, {
+                status: "failed",
+                error,
+              });
+              addLog(
+                "\u2717 File " +
+                  (item.name || item.id) +
+                  " (attempt " + attempt + "): " + error,
+              );
+              saveDebounce(false);
+            },
+            onItemDead: (item, error) => {
+              S.progress.fileDead = (S.progress.fileDead || [])
+                .concat([{ ...item, lastError: error }])
+                .slice(-500);
+              addLog(
+                "\u2717 File dead-lettered: " +
+                  (item.name || item.id) +
+                  ": " + error,
+              );
+              saveDebounce(false);
+              ui.renderAll();
+            },
+            onDrained: () => {
+              // Attachment queue drained — but only truly done if chat also drained
+              checkCompletion();
+            },
+            onStatsChanged: () => {
+              saveDebounce(false);
+            },
+          },
         );
-        addLog(anyPending ? "Paused." : "All done.");
-        if (!anyPending && !exporter.stopRequested && deps.onExportComplete) {
-          await deps.onExportComplete();
+        exporter.attachmentQueue = _attachmentQueue;
+
+        // Wrap attachment queue enqueue to also add task list entries
+        const _attachmentQueueProxy: Queue<AttachmentItem> = {
+          get name() { return _attachmentQueue.name; },
+          get stats() { return _attachmentQueue.stats; },
+          get isRunning() { return _attachmentQueue.isRunning; },
+          start: (signal) => _attachmentQueue.start(signal),
+          stop: () => _attachmentQueue.stop(),
+          setConcurrency: (n) => _attachmentQueue.setConcurrency(n),
+          enqueue: (items) => {
+            for (const item of items) {
+              taskList.add({
+                id: "file-" + item.id,
+                type: "file",
+                label: item.name || item.id,
+                projectName: null,
+                status: "queued",
+                detail: "[" + item.conversationTitle + "]",
+              });
+            }
+            _attachmentQueue.enqueue(items);
+          },
+        };
+
+        // Create chat queue
+        const _chatQueue = createQueue<PendingItem>(
+          {
+            name: "chat",
+            concurrency: clamp(
+              parseInt(String(S.settings.chatConcurrency), 10) || 3,
+              1,
+              8,
+            ),
+            maxRetries: 3,
+            pauseMs: pause,
+            worker: createChatWorker({
+              net,
+              exportBlobStore,
+              attachmentQueue: _attachmentQueueProxy,
+              progress: S.progress,
+              extractFileRefs,
+            }),
+          },
+          {
+            onItemDone: (item) => {
+              S.progress.pending = S.progress.pending.filter(
+                (p) => p.id !== item.id,
+              );
+              S.stats.chatsExported = (S.stats.chatsExported || 0) + 1;
+              const projName = item.gizmo_id
+                ? (
+                    (S.projects || []).find(
+                      (p) => p.gizmoId === item.gizmo_id,
+                    ) || ({} as any)
+                  ).name
+                : null;
+              const title = projName
+                ? "[" + projName + "] " + (item.title || item.id)
+                : item.title || item.id;
+              taskList.update("conv-" + item.id, { status: "done", detail: null });
+              addLog("\u2713 " + title);
+              saveDebounce(false);
+              ui.renderAll();
+            },
+            onItemFailed: (item, error, attempt) => {
+              S.progress.failCounts[item.id] = attempt;
+              taskList.update("conv-" + item.id, {
+                status: "failed",
+                error,
+              });
+              addLog(
+                "\u2717 " +
+                  (item.title || item.id) +
+                  " (attempt " + attempt + "): " + error,
+              );
+              saveDebounce(false);
+            },
+            onItemDead: (item, error) => {
+              S.progress.pending = S.progress.pending.filter(
+                (p) => p.id !== item.id,
+              );
+              S.progress.dead = (S.progress.dead || [])
+                .concat([{ ...item, lastError: error }])
+                .slice(-500);
+              addLog(
+                "\u2717 Dead-lettered: " +
+                  (item.title || item.id) +
+                  ": " + error,
+              );
+              saveDebounce(false);
+              ui.renderAll();
+            },
+            onDrained: () => {
+              chatDrained = true;
+              checkCompletion();
+            },
+            onStatsChanged: () => {
+              saveDebounce(false);
+            },
+          },
+        );
+        exporter.chatQueue = _chatQueue;
+
+        // Create knowledge file queue
+        const kfItems = filterGid
+          ? (S.progress.knowledgeFilesPending || []).filter(
+              (x) => x.projectId === filterGid,
+            )
+          : (S.progress.knowledgeFilesPending || []);
+
+        const _knowledgeQueue = createQueue(
+          {
+            name: "knowledge",
+            concurrency: clamp(
+              parseInt(String(S.settings.knowledgeFileConcurrency), 10) || 3,
+              1,
+              8,
+            ),
+            maxRetries: 3,
+            pauseMs: pause,
+            worker: createKnowledgeWorker({
+              net,
+              exportBlobStore,
+              projects: S.projects || [],
+            }),
+          },
+          {
+            onItemDone: (item: any) => {
+              S.progress.knowledgeFilesPending =
+                S.progress.knowledgeFilesPending.filter(
+                  (p) => p.fileId !== item.fileId,
+                );
+              S.progress.knowledgeFilesExported = (
+                S.progress.knowledgeFilesExported || []
+              ).concat([item]);
+              S.stats.knowledgeFilesDownloaded =
+                (S.stats.knowledgeFilesDownloaded || 0) + 1;
+              taskList.update("kf-" + item.fileId, {
+                status: "done",
+                detail: null,
+              });
+              addLog(
+                "\u2713 KF [" + item.projectName + "] " + item.fileName,
+              );
+              saveDebounce(false);
+              ui.renderAll();
+            },
+            onItemFailed: (item: any, error: string, attempt: number) => {
+              S.progress.knowledgeFilesFailCounts[item.fileId] = attempt;
+              taskList.update("kf-" + item.fileId, {
+                status: "failed",
+                error,
+              });
+              addLog(
+                "\u2717 KF [" + item.projectName + "] " + item.fileName +
+                  " (attempt " + attempt + "): " + error,
+              );
+              saveDebounce(false);
+            },
+            onItemDead: (item: any, error: string) => {
+              S.progress.knowledgeFilesPending =
+                S.progress.knowledgeFilesPending.filter(
+                  (p) => p.fileId !== item.fileId,
+                );
+              S.progress.knowledgeFilesDead = (
+                S.progress.knowledgeFilesDead || []
+              )
+                .concat([{ ...item, lastError: error }])
+                .slice(-500);
+              addLog(
+                "\u2717 KF dead-lettered: [" + item.projectName + "] " +
+                  item.fileName + ": " + error,
+              );
+              saveDebounce(false);
+              ui.renderAll();
+            },
+            onDrained: () => {
+              knowledgeDrained = true;
+              checkCompletion();
+            },
+            onStatsChanged: () => {
+              saveDebounce(false);
+            },
+          },
+        );
+        exporter.knowledgeQueue = _knowledgeQueue;
+
+        // Populate chat queue items
+        const chatItems = filterGid
+          ? S.progress.pending.filter((x) => x.gizmo_id === filterGid)
+          : [...S.progress.pending];
+
+        // Add task list entries
+        for (const item of chatItems) {
+          const projName = item.gizmo_id
+            ? (
+                (S.projects || []).find(
+                  (p) => p.gizmoId === item.gizmo_id,
+                ) || ({} as any)
+              ).name
+            : null;
+          taskList.add({
+            id: "conv-" + item.id,
+            type: "conversation",
+            label: item.title || item.id,
+            projectName: projName || null,
+            status: "queued",
+            detail: null,
+          });
+        }
+        for (const item of kfItems) {
+          taskList.add({
+            id: "kf-" + item.fileId,
+            type: "knowledge",
+            label: item.fileName,
+            projectName: item.projectName,
+            status: "queued",
+            detail: null,
+          });
+        }
+
+        // Enqueue items
+        _chatQueue.enqueue(chatItems);
+
+        const kfQueueItems = kfItems.map((item) => ({
+          ...item,
+          id: item.fileId,
+        }));
+        _knowledgeQueue.enqueue(kfQueueItems);
+
+        // Enqueue any leftover file pending items from a previous interrupted run
+        if (S.progress.filePending && S.progress.filePending.length) {
+          for (const item of S.progress.filePending) {
+            taskList.add({
+              id: "file-" + item.id,
+              type: "file",
+              label: item.name || item.id,
+              projectName: null,
+              status: "queued",
+              detail: "[" + item.conversationTitle + "]",
+            });
+          }
+          _attachmentQueue.enqueue(S.progress.filePending);
+          S.progress.filePending = [];
+        }
+
+        // If nothing to do at all
+        if (!chatItems.length && !kfQueueItems.length && !_attachmentQueue.stats.pending) {
+          ui.setStatus("\u2705 All done.");
+          addLog("All done.");
+          if (!exporter.stopRequested && deps.onExportComplete) {
+            await deps.onExportComplete();
+          }
+          return;
+        }
+
+        addLog(
+          "Queues started: " +
+            chatItems.length + " chats, " +
+            (_attachmentQueue.stats.pending || 0) + " files, " +
+            kfQueueItems.length + " knowledge files.",
+        );
+
+        // Start queues. Use fire-and-forget for queue start promises.
+        // Completion is coordinated via the coordinatorPromise.
+        if (chatItems.length) {
+          _chatQueue.start(ac.signal);
+        } else {
+          chatDrained = true;
+        }
+
+        // Attachment queue always starts — it receives items dynamically from chat workers
+        _attachmentQueue.start(ac.signal);
+
+        if (kfQueueItems.length) {
+          _knowledgeQueue.start(ac.signal);
+        } else {
+          knowledgeDrained = true;
+        }
+
+        // Check completion in case everything was already marked drained
+        // (e.g., no chats and no KF items but filePending from a previous run)
+        checkCompletion();
+
+        // Also listen for abort to resolve coordinator
+        const onAbort = (): void => {
+          if (resolveCoordinator) {
+            const r = resolveCoordinator;
+            resolveCoordinator = null;
+            r();
+          }
+        };
+        ac.signal.addEventListener("abort", onAbort, { once: true });
+
+        // Wait for all queues to complete or be stopped
+        await coordinatorPromise;
+
+        ac.signal.removeEventListener("abort", onAbort);
+
+        // Determine final status
+        const anyPending =
+          S.progress.pending.length > 0 ||
+          (S.progress.knowledgeFilesPending || []).length > 0;
+
+        if (exporter.stopRequested) {
+          ui.setStatus("Paused.");
+          addLog("Stopped.");
+        } else if (anyPending) {
+          ui.setStatus("Paused.");
+          addLog("Paused. Some items pending.");
+        } else {
+          ui.setStatus("\u2705 All done.");
+          addLog("All done.");
+          if (deps.onExportComplete) {
+            await deps.onExportComplete();
+          }
         }
       } catch (e: any) {
         if (e && e.name === "AbortError") {
@@ -523,10 +913,12 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
       } finally {
         S.run.isRunning = false;
         S.run.stoppedAt = now();
-        S.run.lastPhase = "idle";
         saveDebounce(true);
         ui.renderAll();
         exporter.abort = null;
+        exporter.chatQueue = null;
+        exporter.attachmentQueue = null;
+        exporter.knowledgeQueue = null;
       }
     },
 
@@ -541,610 +933,14 @@ export const createExporter = (deps: ExporterDeps): Exporter => {
       }
       exporter.stopRequested = true;
       S.run.isRunning = false;
-      S.run.lastPhase = "idle";
       saveDebounce(true);
       addLog("Stop requested\u2026");
       ui.setStatus("Stopping\u2026");
+      if (exporter.chatQueue) exporter.chatQueue.stop();
+      if (exporter.attachmentQueue) exporter.attachmentQueue.stop();
+      if (exporter.knowledgeQueue) exporter.knowledgeQueue.stop();
       if (exporter.abort) exporter.abort.abort();
       if (exporter._scanAbort) exporter._scanAbort.abort();
-    },
-
-    async exportOneBatch(signal: AbortSignal): Promise<void> {
-      const batchSize = clamp(
-        parseInt(String(S.settings.batch), 10) || 50,
-        1,
-        500,
-      );
-      const conc = clamp(
-        parseInt(String(S.settings.conc), 10) || 3,
-        1,
-        8,
-      );
-      const pause = clamp(
-        parseInt(String(S.settings.pause), 10) || 300,
-        0,
-        5000,
-      );
-      const filterGid = S.settings.filterGizmoId || null;
-      const eligible = filterGid
-        ? S.progress.pending.filter(
-            (x) => x.gizmo_id === filterGid,
-          )
-        : S.progress.pending;
-      const batchItems = eligible.slice(0, batchSize);
-      if (!batchItems.length) return;
-
-      const successes: any[] = [];
-      const successIds = new Set<string>();
-      const exportedMap = S.progress.exported || {};
-      const failInfo: Record<string, string> = {};
-      let filesSaved = 0;
-      let filesFailed = 0;
-      const queue = batchItems.slice();
-      const tBatchStart = now();
-      addLog(
-        "Batch starting: " +
-          batchItems.length +
-          " chats (conc " +
-          conc +
-          ").",
-      );
-
-      const worker = async (): Promise<void> => {
-        while (queue.length && !(signal && signal.aborted)) {
-          const item = queue.shift()!;
-          const projName = item.gizmo_id
-            ? (
-                (S.projects || []).find(
-                  (p) => p.gizmoId === item.gizmo_id,
-                ) || ({} as any)
-              ).name
-            : null;
-          const title = projName
-            ? "[" +
-              projName +
-              "] " +
-              (item.title || item.id)
-            : item.title || item.id;
-          const taskId = "conv-" + item.id;
-          taskList.add({
-            id: taskId,
-            type: "conversation",
-            label: item.title || item.id,
-            projectName: projName || null,
-            status: "active",
-            detail: "fetching conversation",
-          });
-          const t0 = now();
-          try {
-            const detail = await net.fetchJson(
-              "/backend-api/conversation/" + item.id,
-              { signal, auth: true },
-            );
-            const refs = extractFileRefs(detail);
-            if (refs.length)
-              taskList.update(taskId, {
-                detail:
-                  "downloading 1/" + refs.length + " files",
-              });
-            for (let i = 0; i < refs.length; i++) {
-              if (signal && signal.aborted)
-                throw new DOMException(
-                  "Aborted",
-                  "AbortError",
-                );
-              const f = refs[i];
-              taskList.update(taskId, {
-                detail:
-                  "downloading " +
-                  (i + 1) +
-                  "/" +
-                  refs.length +
-                  " files",
-              });
-              try {
-                const meta = (await net.fetchJson(
-                  "/backend-api/files/download/" + f.id,
-                  { signal, auth: true },
-                )) as any;
-                if (meta && meta.download_url) {
-                  const isSameOrigin =
-                    meta.download_url.startsWith("/") ||
-                    meta.download_url.startsWith(
-                      location.origin,
-                    );
-                  const blob = await net.fetchBlob(
-                    meta.download_url,
-                    {
-                      signal,
-                      auth: false,
-                      credentials: isSameOrigin
-                        ? "same-origin"
-                        : "omit",
-                    },
-                  );
-                  const ext =
-                    blob.type && blob.type.indexOf("/") > -1
-                      ? blob.type.split("/")[1]
-                      : "bin";
-                  const fname = f.name
-                    ? f.id +
-                      "_" +
-                      sanitizeName(f.name)
-                    : f.id +
-                      "." +
-                      sanitizeName(ext);
-                  await exportBlobStore.putFile(fname, blob);
-                  filesSaved++;
-                } else {
-                  filesFailed++;
-                  addLog(
-                    "No download_url for file " +
-                      f.id +
-                      " (" +
-                      title +
-                      ")",
-                  );
-                }
-              } catch (e: any) {
-                filesFailed++;
-                addLog(
-                  "File failed " +
-                    f.id +
-                    " (" +
-                    title +
-                    "): " +
-                    ((e && e.message) || e),
-                );
-              }
-              if (pause)
-                await sleep(pause, signal).catch(() => {});
-            }
-            await exportBlobStore.putConv(
-              item.id,
-              JSON.stringify(detail),
-            );
-            successes.push(detail);
-            successIds.add(item.id);
-            exportedMap[item.id] = item.update_time || 0;
-            S.progress.exported = exportedMap;
-            taskList.update(taskId, {
-              status: "done",
-              detail: null,
-            });
-            addLog(
-              "\u2713 " +
-                title +
-                " (" +
-                fmtMs(now() - t0) +
-                ", files " +
-                refs.length +
-                ")",
-            );
-          } catch (e: any) {
-            if (e && e.name === "AbortError") throw e;
-            const msg = (e && e.message) || String(e);
-            failInfo[item.id] = msg;
-            taskList.update(taskId, {
-              status: "failed",
-              error: msg,
-            });
-            addLog("\u2717 " + title + ": " + msg);
-          }
-          ui.renderAll();
-          if (pause)
-            await sleep(pause, signal).catch(() => {});
-        }
-      };
-
-      const workers: Promise<void>[] = [];
-      for (
-        let i = 0;
-        i < Math.min(conc, queue.length || 1);
-        i++
-      )
-        workers.push(worker());
-      try {
-        await Promise.all(workers);
-      } catch (e: any) {
-        if (!(e && e.name === "AbortError")) throw e;
-      }
-
-      const batchWall = now() - tBatchStart;
-
-      const updatePendingAfterBatch = (): {
-        requeueCount: number;
-        deadCount: number;
-      } => {
-        const batchIdSet = new Set(
-          batchItems.map((x) => x.id),
-        );
-        const rest = S.progress.pending.filter(
-          (x) => !batchIdSet.has(x.id),
-        );
-        const requeue: PendingItem[] = [];
-        const dead: DeadItem[] = [];
-        const fc = S.progress.failCounts || {};
-        for (const it of batchItems) {
-          if (successIds.has(it.id)) continue;
-          const n = (fc[it.id] || 0) + 1;
-          fc[it.id] = n;
-          if (n >= 3)
-            dead.push({
-              ...it,
-              lastError: failInfo[it.id] || "failed",
-            });
-          else requeue.push(it);
-        }
-        if (dead.length) {
-          S.progress.dead = (S.progress.dead || [])
-            .concat(dead)
-            .slice(-500);
-          addLog(
-            "Moved " +
-              dead.length +
-              " chats to dead-letter after 3 failures.",
-          );
-        }
-        S.progress.failCounts = fc;
-        S.progress.pending = rest.concat(requeue);
-        return {
-          requeueCount: requeue.length,
-          deadCount: dead.length,
-        };
-      };
-
-      if (successes.length) {
-        S.stats.batches = (S.stats.batches || 0) + 1;
-        S.stats.batchMs =
-          (S.stats.batchMs || 0) + batchWall;
-        S.stats.chats =
-          (S.stats.chats || 0) + successes.length;
-        const moved = updatePendingAfterBatch();
-        saveDebounce(true);
-        addLog(
-          "Batch done: exported " +
-            successes.length +
-            " chats in " +
-            fmtMs(batchWall) +
-            ". Pending " +
-            S.progress.pending.length +
-            ". Files +" +
-            filesSaved +
-            "/-" +
-            filesFailed +
-            ".",
-        );
-        if (moved.requeueCount === batchItems.length) {
-          addLog(
-            "No progress detected; pausing to avoid infinite retries.",
-          );
-          exporter.stopRequested = true;
-          if (exporter.abort) exporter.abort.abort();
-        }
-      } else {
-        const moved = updatePendingAfterBatch();
-        saveDebounce(true);
-        addLog(
-          "Batch ended with 0 exports (" +
-            fmtMs(batchWall) +
-            "). Requeued " +
-            moved.requeueCount +
-            ", dead " +
-            moved.deadCount +
-            ".",
-        );
-        ui.setStatus("Batch had 0 exports (see log).");
-        if (
-          moved.requeueCount &&
-          moved.requeueCount === batchItems.length
-        ) {
-          addLog(
-            "No progress this batch; pausing to avoid infinite retries.",
-          );
-          exporter.stopRequested = true;
-          if (exporter.abort) exporter.abort.abort();
-        }
-      }
-      await exportBlobStore.totalSize();
-      ui.renderAll();
-    },
-
-    async exportKnowledgeBatch(
-      signal: AbortSignal,
-    ): Promise<void> {
-      const batchSize = clamp(
-        parseInt(String(S.settings.batch), 10) || 50,
-        1,
-        500,
-      );
-      const conc = clamp(
-        parseInt(String(S.settings.conc), 10) || 3,
-        1,
-        8,
-      );
-      const pause = clamp(
-        parseInt(String(S.settings.pause), 10) || 300,
-        0,
-        5000,
-      );
-      const filterGid = S.settings.filterGizmoId || null;
-      const kfEligible = filterGid
-        ? S.progress.kfPending.filter(
-            (x) => x.projectId === filterGid,
-          )
-        : S.progress.kfPending;
-      const batchItems = kfEligible.slice(0, batchSize);
-      if (!batchItems.length) return;
-
-      const successes: KfPendingItem[] = [];
-      const successIds = new Set<string>();
-      const failInfo: Record<string, string> = {};
-      const projectsInBatch = new Set<string>();
-      const queue = batchItems.slice();
-      const tBatchStart = now();
-      addLog(
-        "KF batch starting: " +
-          batchItems.length +
-          " files (conc " +
-          conc +
-          ").",
-      );
-      S.run.lastPhase = "kf";
-      saveDebounce(false);
-
-      const worker = async (): Promise<void> => {
-        while (queue.length && !(signal && signal.aborted)) {
-          const item = queue.shift()!;
-          const label =
-            "[" + item.projectName + "] " + item.fileName;
-          const taskId = "kf-" + item.fileId;
-          taskList.add({
-            id: taskId,
-            type: "knowledge",
-            label: item.fileName,
-            projectName: item.projectName,
-            status: "active",
-            detail: "downloading",
-          });
-          const t0 = now();
-          try {
-            const meta = (await net.fetchJson(
-              "/backend-api/files/download/" +
-                encodeURIComponent(item.fileId) +
-                "?gizmo_id=" +
-                encodeURIComponent(item.projectId) +
-                "&inline=false",
-              { signal, auth: true },
-            )) as any;
-            if (
-              meta &&
-              meta.status === "error" &&
-              meta.error_code === "file_not_found"
-            ) {
-              S.progress.kfDead = (
-                S.progress.kfDead || []
-              )
-                .concat([
-                  {
-                    ...item,
-                    lastError: "file_not_found",
-                  } as KfDeadItem,
-                ])
-                .slice(-500);
-              S.progress.kfFailCounts[item.fileId] = 3;
-              failInfo[item.fileId] = "file_not_found";
-              taskList.update(taskId, {
-                status: "failed",
-                error: "file_not_found",
-              });
-              addLog(
-                "\u2717 KF dead-lettered (not found): " +
-                  label,
-              );
-              ui.renderAll();
-              if (pause)
-                await sleep(pause, signal).catch(() => {});
-              continue;
-            }
-            if (
-              meta &&
-              meta.status === "success" &&
-              meta.download_url
-            ) {
-              const isSameOrigin =
-                meta.download_url.startsWith("/") ||
-                meta.download_url.startsWith(
-                  location.origin,
-                );
-              const blob = await net.fetchBlob(
-                meta.download_url,
-                {
-                  signal,
-                  auth: false,
-                  credentials: isSameOrigin
-                    ? "same-origin"
-                    : "omit",
-                },
-              );
-              const safeProjName = sanitizeName(
-                item.projectName,
-              );
-              const safeFname = sanitizeName(
-                item.fileName,
-              );
-              await exportBlobStore.putFile(
-                "kf/" + safeProjName + "/" + safeFname,
-                blob,
-              );
-              successes.push(item);
-              successIds.add(item.fileId);
-              projectsInBatch.add(item.projectId);
-              taskList.update(taskId, {
-                status: "done",
-                detail: null,
-              });
-              addLog(
-                "\u2713 KF " +
-                  label +
-                  " (" +
-                  fmtMs(now() - t0) +
-                  ")",
-              );
-            } else {
-              failInfo[item.fileId] =
-                "no download_url in response";
-              taskList.update(taskId, {
-                status: "failed",
-                error: "no download_url in response",
-              });
-              addLog(
-                "\u2717 KF no download_url: " + label,
-              );
-            }
-          } catch (e: any) {
-            if (e && e.name === "AbortError") throw e;
-            const msg = (e && e.message) || String(e);
-            failInfo[item.fileId] = msg;
-            taskList.update(taskId, {
-              status: "failed",
-              error: msg,
-            });
-            addLog("\u2717 KF " + label + ": " + msg);
-          }
-          ui.renderAll();
-          if (pause)
-            await sleep(pause, signal).catch(() => {});
-        }
-      };
-
-      const workers: Promise<void>[] = [];
-      for (
-        let i = 0;
-        i < Math.min(conc, queue.length || 1);
-        i++
-      )
-        workers.push(worker());
-      try {
-        await Promise.all(workers);
-      } catch (e: any) {
-        if (!(e && e.name === "AbortError")) throw e;
-      }
-
-      const batchWall = now() - tBatchStart;
-
-      const updateKfPendingAfterBatch = (): {
-        requeueCount: number;
-        deadCount: number;
-      } => {
-        const batchFileIdSet = new Set(
-          batchItems.map((x) => x.fileId),
-        );
-        const rest = S.progress.kfPending.filter(
-          (x) => !batchFileIdSet.has(x.fileId),
-        );
-        const requeue: KfPendingItem[] = [];
-        const dead: KfDeadItem[] = [];
-        const fc = S.progress.kfFailCounts || {};
-        for (const it of batchItems) {
-          if (successIds.has(it.fileId)) continue;
-          if (fc[it.fileId] >= 3) continue;
-          const n = (fc[it.fileId] || 0) + 1;
-          fc[it.fileId] = n;
-          if (n >= 3)
-            dead.push({
-              ...it,
-              lastError: failInfo[it.fileId] || "failed",
-            });
-          else requeue.push(it);
-        }
-        if (dead.length) {
-          S.progress.kfDead = (S.progress.kfDead || [])
-            .concat(dead)
-            .slice(-500);
-          addLog(
-            "Moved " +
-              dead.length +
-              " knowledge files to dead-letter after 3 failures.",
-          );
-        }
-        S.progress.kfFailCounts = fc;
-        S.progress.kfPending = rest.concat(requeue);
-        return {
-          requeueCount: requeue.length,
-          deadCount: dead.length,
-        };
-      };
-
-      if (successes.length) {
-        for (const projId of projectsInBatch) {
-          const proj = (S.projects || []).find(
-            (p) => p.gizmoId === projId,
-          );
-          if (proj && proj.raw) {
-            const safeProjName = sanitizeName(proj.name);
-            await exportBlobStore.putFile(
-              "kf/" + safeProjName + "/project.json",
-              new Blob(
-                [JSON.stringify(proj.raw, null, 2)],
-                { type: "application/json" },
-              ),
-            );
-          }
-        }
-        S.progress.kfExported = (
-          S.progress.kfExported || []
-        ).concat(successes);
-        S.stats.kfBatches =
-          (S.stats.kfBatches || 0) + 1;
-        S.stats.kfMs =
-          (S.stats.kfMs || 0) + batchWall;
-        S.stats.kfFiles =
-          (S.stats.kfFiles || 0) + successes.length;
-        const moved = updateKfPendingAfterBatch();
-        saveDebounce(true);
-        addLog(
-          "KF batch done: exported " +
-            successes.length +
-            " files in " +
-            fmtMs(batchWall) +
-            ". KF pending " +
-            S.progress.kfPending.length +
-            ".",
-        );
-        if (moved.requeueCount === batchItems.length) {
-          addLog(
-            "No KF progress detected; pausing to avoid infinite retries.",
-          );
-          exporter.stopRequested = true;
-          if (exporter.abort) exporter.abort.abort();
-        }
-      } else {
-        const moved = updateKfPendingAfterBatch();
-        saveDebounce(true);
-        addLog(
-          "KF batch ended with 0 exports (" +
-            fmtMs(batchWall) +
-            "). Requeued " +
-            moved.requeueCount +
-            ", dead " +
-            moved.deadCount +
-            ".",
-        );
-        ui.setStatus("KF batch had 0 exports (see log).");
-        if (
-          moved.requeueCount &&
-          moved.requeueCount === batchItems.length
-        ) {
-          addLog(
-            "No KF progress this batch; pausing to avoid infinite retries.",
-          );
-          exporter.stopRequested = true;
-          if (exporter.abort) exporter.abort.abort();
-        }
-      }
-      await exportBlobStore.totalSize();
-      ui.renderAll();
     },
   };
 

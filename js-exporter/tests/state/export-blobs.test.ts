@@ -175,6 +175,32 @@ describe("ExportBlobStore", () => {
     await ExportBlobStore.clear(); // should not throw
   });
 
+  it("hasFilePrefix returns true when a key starts with prefix", async () => {
+    const { initExportBlobsIdb, ExportBlobStore } = await import(
+      "../../src/state/export-blobs"
+    );
+    await initExportBlobsIdb();
+    await ExportBlobStore.putFile("abc123_readme.txt", new Blob(["data"]));
+    const exists = await ExportBlobStore.hasFilePrefix("abc123");
+    expect(exists).toBe(true);
+  });
+
+  it("hasFilePrefix returns false when no key starts with prefix", async () => {
+    const { initExportBlobsIdb, ExportBlobStore } = await import(
+      "../../src/state/export-blobs"
+    );
+    await initExportBlobsIdb();
+    await ExportBlobStore.putFile("xyz_readme.txt", new Blob(["data"]));
+    const exists = await ExportBlobStore.hasFilePrefix("abc123");
+    expect(exists).toBe(false);
+  });
+
+  it("hasFilePrefix returns false when db is not initialized", async () => {
+    const { ExportBlobStore } = await import("../../src/state/export-blobs");
+    const exists = await ExportBlobStore.hasFilePrefix("abc123");
+    expect(exists).toBe(false);
+  });
+
   it("getAllConvKeys returns multiple keys in sorted order", async () => {
     const { initExportBlobsIdb, ExportBlobStore } = await import(
       "../../src/state/export-blobs"

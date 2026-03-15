@@ -133,6 +133,28 @@ export const ExportBlobStore = {
     return size;
   },
 
+  async hasFilePrefix(prefix: string): Promise<boolean> {
+    if (!_db) return false;
+    return new Promise((resolve, reject) => {
+      const tx = _db!.transaction(FILES_STORE, "readonly");
+      const store = tx.objectStore(FILES_STORE);
+      const req = store.openKeyCursor();
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) {
+          resolve(false);
+          return;
+        }
+        if ((cursor.key as string).startsWith(prefix)) {
+          resolve(true);
+          return;
+        }
+        cursor.continue();
+      };
+      req.onerror = () => reject(req.error);
+    });
+  },
+
   async clear(): Promise<void> {
     await idbClear(CONV_STORE);
     await idbClear(FILES_STORE);

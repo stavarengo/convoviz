@@ -1,5 +1,5 @@
 import type { ExportState, PendingItem } from "../types";
-import { clamp } from "../utils/format";
+
 
 interface ScanNet {
   getToken(signal?: AbortSignal): Promise<string>;
@@ -16,9 +16,7 @@ export const scanConversations = async (
   setStatus: (msg: string) => void,
 ): Promise<PendingItem[]> => {
   await net.getToken(signal);
-  const rawBatch = clamp(parseInt(String(S.settings.batch), 10) || 50, 1, 500);
-  const pageSize = Math.min(rawBatch, 100);
-  if (rawBatch > 100) setStatus("Scan page size capped at 100 (API limit)");
+  const pageSize = 100;
   let offset = 0;
   const items: PendingItem[] = [];
   let consecutiveKnownPages = 0;

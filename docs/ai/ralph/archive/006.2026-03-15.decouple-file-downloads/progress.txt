@@ -1,0 +1,174 @@
+# PRD: Decouple File Downloads from Chat Export
+
+Base commit: d743f3c67790bd08acc71e2320ca2ca39c5354ba
+
+## Codebase Patterns
+
+Squash from: d743f3c67790bd08acc71e2320ca2ca39c5354ba
+Final commit: 475e00a9ab4db1a5f571fb30e719774253ae71ec
+
+- js-exporter uses vitest for tests, tsconfig with `noEmit: true`, esbuild for bundling
+- Test files live in `js-exporter/tests/` mirroring `js-exporter/src/` structure
+- Use `npx vitest run` and `npx tsc --noEmit` for quality checks (no global installs)
+- Need `npm install` in worktrees before running tests (node_modules not shared)
+- Factory function pattern: `createQueue()` not `new Queue()` — consistent with `createExporter()`, `createChatWorker()`
+- Queue auto-drain requires `itemsEverSeen` flag — an empty start() must park workers, not resolve immediately
+- Worker functions follow closure-based DI: `createXWorker(deps)` returns `(item, signal) => Promise<void>`
+- `AttachmentItem` type defined in `attachment-worker.ts` but imported by `chat-worker.ts` — shared across workers
+- `ExportBlobStore.hasFilePrefix(prefix)` checks if any file key in IDB starts with the given prefix (used for attachment dedup)
+- Queue supports `immediateDeadLetter` property on thrown errors — sets fail count to maxRetries, bypassing retry requeue
+- Exporter uses a coordinator pattern for completion detection: chatDrained + attachmentIdle + knowledgeDrained = all done
+- Attachment queue starts with all queues but receives items dynamically from chat workers; stop it when chat drains and attachment is idle
+- `Exporter` interface no longer has `exportOneBatch`/`exportKnowledgeBatch` — replaced by queue-based processing
+- Exporter exposes `chatQueue`, `attachmentQueue`, `knowledgeQueue` on the instance for UI to call `setConcurrency()`
+- State v3: `Settings` has `chatConcurrency`, `fileConcurrency`, `knowledgeFileConcurrency` (no more `batch`/`conc`)
+- State v3: `Progress` KF fields renamed `kf*` -> `knowledgeFiles*`, new `file*` fields for attachment queue
+- State v3: `Stats` uses `chatsExported`/`chatsMs`/`filesDownloaded`/`filesMs`/`knowledgeFilesDownloaded`/`knowledgeFilesMs`
+- State v3: `RunState` no longer has `lastPhase`
+- Migration function lives in `state/migrate.ts` (separate from `store.ts` and `defaults.ts` to avoid circular imports)
+- `scan/conversations.ts` uses fixed page size of 100 (no longer derived from batch setting)
+
+---
+
+## 2026-03-15 - US-001
+
+- Implemented generic `Queue<T extends QueueItem>` abstraction in `js-exporter/src/export/queue.ts`
+- Created 19 unit tests in `js-exporter/tests/export/queue.test.ts`
+- Files changed:
+  - `js-exporter/src/export/queue.ts` (new)
+  - `js-exporter/tests/export/queue.test.ts` (new)
+- **Learnings for future iterations:**
+  - Queue drain detection needs an `itemsEverSeen` guard — without it, starting an empty queue immediately resolves the start() promise instead of parking workers
+  - The wake mechanism chains resolvers: when multiple workers park, each chains onto the previous `wakeResolve`, so a single `wake()` call unparks them all
+  - `setConcurrency(n)` spawns new workerLoop instances when increasing; excess workers exit naturally on next loop iteration when `workerCount > targetConcurrency`
+
+---
+
+## 2026-03-15 - US-002
+
+- Implemented chat queue worker in `js-exporter/src/export/chat-worker.ts`
+- Defined `AttachmentItem` type in `js-exporter/src/export/attachment-worker.ts` (type only, worker not yet implemented)
+- Created 3 unit tests in `js-exporter/tests/export/chat-worker.test.ts`
+- Files changed:
+  - `js-exporter/src/export/chat-worker.ts` (new)
+  - `js-exporter/src/export/attachment-worker.ts` (new, type definition only)
+  - `js-exporter/tests/export/chat-worker.test.ts` (new)
+- **Learnings for future iterations:**
+
+  No significant learnings.
+
+---
+
+## 2026-03-15 - US-003
+
+- Implemented attachment queue worker in `js-exporter/src/export/attachment-worker.ts`
+- Added `createAttachmentWorker(deps)` factory alongside existing `AttachmentItem` type
+- Created 7 unit tests in `js-exporter/tests/export/attachment-worker.test.ts`
+- Files changed:
+  - `js-exporter/src/export/attachment-worker.ts` (updated: added worker function + deps interface)
+  - `js-exporter/tests/export/attachment-worker.test.ts` (new)
+- **Learnings for future iterations:**
+  - The dedup check uses `hasFilePrefix(fileId)` on the blob store — this method doesn't exist on `ExportBlobStore` yet and must be added when wiring (US-006)
+  - Same-origin detection uses `typeof location !== "undefined"` guard for test environments where `location` is not defined
+  - Filename convention matches existing exporter.ts: `{id}_{sanitizedName}` when name is present, `{id}.{ext}` when null (ext from blob MIME type, fallback "bin")
+
+---
+
+## 2026-03-15 - US-004
+
+- Implemented knowledge file queue worker in `js-exporter/src/export/knowledge-worker.ts`
+- Defined `KnowledgeFileItem` type extending `QueueItem` and `FileNotFoundError` class
+- Created 8 unit tests in `js-exporter/tests/export/knowledge-worker.test.ts`
+- Files changed:
+  - `js-exporter/src/export/knowledge-worker.ts` (new)
+  - `js-exporter/tests/export/knowledge-worker.test.ts` (new)
+  - `docs/ai/ralph/current/prd.md` (US-004 status -> done)
+  - `docs/ai/ralph/current/progress.txt` (this entry)
+- **Learnings for future iterations:**
+  - `FileNotFoundError` uses `immediateDeadLetter = true` property as a convention for the queue wiring layer to detect and bypass retries (set fail count to maxRetries)
+  - Knowledge worker stores `project.json` idempotently on every file download (same data each time) — no tracking needed, the IDB putFile is naturally idempotent
+  - The `encodeURIComponent()` on fileId and projectId in the metadata URL matches the existing `exportKnowledgeBatch()` pattern in exporter.ts
+
+---
+
+## 2026-03-15 - US-005
+
+- Updated `ExportState` type system from v2 to v3 schema
+- Updated `types.ts`: new `Progress` fields (filePending, fileDead, fileFailCounts, fileDoneCount), renamed KF fields, new `Settings` (chatConcurrency/fileConcurrency/knowledgeFileConcurrency), new `Stats`, removed `lastPhase` from `RunState`
+- Updated `state/defaults.ts`: v3 default state, `mergeState` applies v2->v3 migration automatically
+- Created `state/migrate.ts`: `migrateV2toV3()` function with full field-by-field transformation
+- Updated `state/store.ts`: re-exports `migrateV2toV3`
+- Updated all references in `export/exporter.ts`, `scan/conversations.ts`, `ui/panel.ts`
+- Updated all existing tests to use v3 field names
+- Created 12 migration tests in `tests/state/migration-v3.test.ts`
+- Files changed:
+  - `js-exporter/src/types.ts` (updated: v3 types, imports AttachmentItem)
+  - `js-exporter/src/state/defaults.ts` (updated: v3 defaults, migration call in mergeState)
+  - `js-exporter/src/state/migrate.ts` (new: migrateV2toV3 function)
+  - `js-exporter/src/state/store.ts` (updated: re-exports migrateV2toV3)
+  - `js-exporter/src/export/exporter.ts` (updated: v3 field names, removed lastPhase)
+  - `js-exporter/src/scan/conversations.ts` (updated: fixed page size 100, removed batch dependency)
+  - `js-exporter/src/ui/panel.ts` (updated: v3 field names)
+  - `js-exporter/tests/state/migration-v3.test.ts` (new: 12 tests)
+  - `js-exporter/tests/state/defaults.test.ts` (updated: v3 expectations)
+  - `js-exporter/tests/state/store.test.ts` (updated: v3 field names)
+  - `js-exporter/tests/export/exporter.test.ts` (updated: v3 field names)
+  - `js-exporter/tests/scan/conversations.test.ts` (updated: removed batch dependency)
+  - `js-exporter/tests/ui/panel.test.ts` (updated: v3 field names)
+  - `js-exporter/tests/types.test.ts` (updated: v3 type assertions)
+- **Learnings for future iterations:**
+  - Migration function must live in its own file (`state/migrate.ts`) to avoid circular dependency between `defaults.ts` (which calls migration) and `store.ts` (which imports defaults)
+  - When renaming state fields, local variable names in `exporter.ts` (like `kfExportedSet`) don't need renaming -- only property accesses on `S.progress.*` do
+  - The scan page size was coupled to the `batch` setting; with batch removed, a fixed page size of 100 (the API max) is simpler and correct
+
+---
+
+## 2026-03-15 - US-006
+
+- Wired three `Queue` instances (chat, attachment, knowledge) into `exporter.ts`, replacing batch-based export loop
+- Added `hasFilePrefix()` method to `ExportBlobStore` for attachment dedup
+- Added `immediateDeadLetter` support to the generic queue (errors with this property bypass retry requeue)
+- Coordinator pattern for completion detection: tracks drain state of all three queues with special handling for attachment queue (receives items dynamically from chat workers)
+- Deleted `exportOneBatch()` and `exportKnowledgeBatch()` methods entirely
+- Deleted all batch-related logic: batch size selection, batch boundary retry evaluation, batch counting
+- Replaced sequential `while` loops in `start()` with concurrent queue starts
+- Exposed `chatQueue`, `attachmentQueue`, `knowledgeQueue` on `Exporter` for UI `setConcurrency()` access
+- Updated `ExportBlobStoreApi` interface to require `hasFilePrefix`
+- Files changed:
+  - `js-exporter/src/export/exporter.ts` (rewritten: queue-based, removed batch methods)
+  - `js-exporter/src/export/queue.ts` (updated: immediateDeadLetter support)
+  - `js-exporter/src/state/export-blobs.ts` (updated: added hasFilePrefix method)
+  - `js-exporter/tests/export/exporter.test.ts` (updated: removed batch method tests, added hasFilePrefix to mock)
+  - `js-exporter/tests/export/exporter-queues.test.ts` (new: 7 integration tests)
+  - `js-exporter/tests/export/queue.test.ts` (updated: added immediateDeadLetter test)
+  - `js-exporter/tests/state/export-blobs.test.ts` (updated: added 3 hasFilePrefix tests)
+- **Learnings for future iterations:**
+  - The attachment queue cannot use the standard queue drain detection when it starts empty (no items = `itemsEverSeen` stays false, queue parks forever). Use a coordinator pattern: start the attachment queue, and stop it externally when the chat queue drains and the attachment queue is idle.
+  - Queue fire-and-forget start: `queue.start()` is called without `await` — completion is coordinated via an external promise resolved by `onDrained` callbacks, not by `Promise.all` of queue starts.
+  - `ExportBlobStoreApi` is the interface for the exporter's dependency; it now requires `hasFilePrefix` in addition to `putConv`/`putFile`/`totalSize`.
+- UI `ExporterRef` interface includes optional `chatQueue`, `attachmentQueue`, `knowledgeQueue` for live `setConcurrency()` calls
+- Attachment queue proxy pattern: exporter wraps `_attachmentQueue.enqueue` to also add task list entries with `type: "file"`
+- Download button is always enabled when IDB has data, even while queues are running (no `btn.disabled = !!S.run.isRunning`)
+
+---
+
+## 2026-03-15 - US-007
+
+- Updated UI panel for queue-based export: 3 per-queue stats rows, 3 concurrency inputs, file task entries
+- Replaced single progress bar with 3 rows: Chats (green), Files (blue), Knowledge (purple) each with progress bar and dead count
+- Replaced "Batch" input with 3 per-queue concurrency inputs: "Workers: Chats [3] Files [3] KF [3]"
+- Download button always enabled when accumulated data exists (removed `btn.disabled = !!S.run.isRunning` guard)
+- Added file task list entries via attachment queue proxy pattern: enqueue intercepted to add `type: "file"` tasks
+- Concurrency inputs call `setConcurrency()` on live queues in real-time
+- Updated bundle size threshold from 20% to 25% to account for additional UI code
+- Files changed:
+  - `js-exporter/src/ui/panel.ts` (rewritten: per-queue stats, concurrency inputs, download always enabled)
+  - `js-exporter/src/export/exporter.ts` (updated: attachment queue proxy for task entries)
+  - `js-exporter/tests/ui/panel.test.ts` (updated: 36 tests, replaced old batch/single-bar tests with per-queue tests)
+  - `js-exporter/tests/export/exporter-queues.test.ts` (updated: added 2 file task list entry tests)
+  - `js-exporter/tests/build.test.ts` (updated: bundle size threshold 20% -> 25%)
+- **Learnings for future iterations:**
+  - To add task entries for dynamically-enqueued items (like attachment queue items pushed by chat workers), use a proxy/wrapper pattern around the queue's `enqueue` method rather than modifying the queue abstraction itself
+  - The `ExporterRef` in `panel.ts` must include optional queue references so the UI can call `setConcurrency()` without tight coupling to the full `Exporter` type
+
+---
