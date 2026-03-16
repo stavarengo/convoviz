@@ -150,6 +150,34 @@ describe("bootstrap", () => {
     expect(result.projectScanner).toBeDefined();
   });
 
+  describe("scanner-progress event -> S.scan.total", () => {
+    it("updates S.scan.total from the general scanner", () => {
+      const S = makeS();
+      const result = doBootstrap(S);
+
+      result.eventBus.emit("scanner-progress", {
+        scannerId: "general",
+        offset: 100,
+        total: 3769,
+      });
+
+      expect(S.scan.total).toBe(3769);
+    });
+
+    it("ignores project-specific scanner totals", () => {
+      const S = makeS();
+      const result = doBootstrap(S);
+
+      result.eventBus.emit("scanner-progress", {
+        scannerId: "project-conv-gizmo-1",
+        offset: 50,
+        total: 200,
+      });
+
+      expect(S.scan.total).toBe(0);
+    });
+  });
+
   describe("conversation-needs-export event -> chat queue", () => {
     it("looks up discovery store and enqueues into chat queue", async () => {
       const S = makeS();

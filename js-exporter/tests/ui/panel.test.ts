@@ -131,21 +131,27 @@ describe("createUI", () => {
       expect(parseFloat(el.style.width)).toBe(25);
     });
 
-    it("knowledge bar reflects exported/(exported+pending+dead) percentage", () => {
+    it("knowledge bar reflects exported/(exported+inFlight+dead) percentage", () => {
       const deps = makeDeps();
       deps.S.progress.knowledgeFilesExported = [
         { projectId: "p1", projectName: "P1", fileId: "f1", fileName: "a.txt", fileType: "text", fileSize: 10 },
         { projectId: "p1", projectName: "P1", fileId: "f2", fileName: "b.txt", fileType: "text", fileSize: 10 },
       ];
-      deps.S.progress.knowledgeFilesPending = [
-        { projectId: "p1", projectName: "P1", fileId: "f3", fileName: "c.txt", fileType: "text", fileSize: 10 },
-        { projectId: "p1", projectName: "P1", fileId: "f4", fileName: "d.txt", fileType: "text", fileSize: 10 },
-      ];
       deps.S.progress.knowledgeFilesDead = [];
-      const ui = createUI(deps);
+      const ui = createUI(deps) as any;
       ui.inject();
+      ui.setExporter({
+        scanPromise: null,
+        start: vi.fn(),
+        stop: vi.fn(),
+        rescan: vi.fn(),
+        chatQueue: { setConcurrency: vi.fn(), stats: { pending: 0, active: 0, done: 0, dead: 0 } },
+        attachmentQueue: { setConcurrency: vi.fn(), stats: { pending: 0, active: 0, done: 0, dead: 0 } },
+        knowledgeQueue: { setConcurrency: vi.fn(), stats: { pending: 2, active: 0, done: 2, dead: 0 } },
+      });
       ui.renderAll();
       const el = document.getElementById("cvz-kf-bar")!;
+      // 2 exported / (2 exported + 2 in-flight) = 50%
       expect(parseFloat(el.style.width)).toBe(50);
     });
   });
@@ -179,19 +185,39 @@ describe("createUI", () => {
     it("reflects correct chat exported/total and dead counts from state", () => {
       const deps = makeDeps();
       deps.S.progress.exported = { a: 1, b: 2, c: 3 };
-      deps.S.progress.pending = [
-        { id: "d", title: "d", update_time: 0, gizmo_id: null },
-        { id: "e", title: "e", update_time: 0, gizmo_id: null },
-      ];
+      deps.S.scan.total = 5;
       deps.S.progress.dead = [
         { id: "f", title: "f", update_time: 0, gizmo_id: null, lastError: "err" },
       ];
       const ui = createUI(deps);
       ui.inject();
       ui.renderAll();
-      // Chat row: 3 exported out of 3+2=5
+      // Chat row: 3 exported out of scan total 5
       expect(document.getElementById("cvz-chat-count")!.textContent).toContain("3/5");
       expect(document.getElementById("cvz-chat-dead")!.textContent).toBe("1");
+    });
+
+    it("chat counter falls back to exported + queue in-flight + dead when scan.total is 0", () => {
+      const deps = makeDeps();
+      deps.S.progress.exported = { a: 1, b: 2 };
+      deps.S.scan.total = 0;
+      deps.S.progress.dead = [
+        { id: "c", title: "c", update_time: 0, gizmo_id: null, lastError: "err" },
+      ];
+      const ui = createUI(deps) as any;
+      ui.inject();
+      ui.setExporter({
+        scanPromise: null,
+        start: vi.fn(),
+        stop: vi.fn(),
+        rescan: vi.fn(),
+        chatQueue: { setConcurrency: vi.fn(), stats: { pending: 3, active: 1, done: 2, dead: 1 } },
+        attachmentQueue: { setConcurrency: vi.fn(), stats: { pending: 0, active: 0, done: 0, dead: 0 } },
+        knowledgeQueue: { setConcurrency: vi.fn(), stats: { pending: 0, active: 0, done: 0, dead: 0 } },
+      });
+      ui.renderAll();
+      // fallback: exported(2) + inFlight(3+1) + dead(1) = 7
+      expect(document.getElementById("cvz-chat-count")!.textContent).toBe("2/7");
     });
 
     it("computes chat progress bar from exported vs total", () => {
@@ -215,54 +241,63 @@ describe("createUI", () => {
       deps.S.progress.knowledgeFilesExported = [
         { projectId: "p1", projectName: "P1", fileId: "f1", fileName: "a.txt", fileType: "text", fileSize: 10 },
       ];
-      deps.S.progress.knowledgeFilesPending = [
-        { projectId: "p1", projectName: "P1", fileId: "f2", fileName: "b.txt", fileType: "text", fileSize: 20 },
-      ];
       deps.S.progress.knowledgeFilesDead = [];
       const ui = createUI(deps);
       ui.inject();
       ui.renderAll();
-      // Chat row
+      // Chat row: 3/10 (from scan.total)
       expect(document.getElementById("cvz-chat-count")!.textContent).toContain("3");
-      // File row
-      expect(document.getElementById("cvz-file-count")!.textContent).toContain("12");
+      // File row: no exporter set, so in-flight = 0 → total = 12 + 0 + 1 = 13
+      expect(document.getElementById("cvz-file-count")!.textContent).toBe("12/13");
       expect(document.getElementById("cvz-file-dead")!.textContent).toBe("1");
-      // KF row
+      // KF row: no exporter set, so in-flight = 0 → total = 1 + 0 + 0 = 1
       expect(document.getElementById("cvz-kf-count")!.textContent).toContain("1");
     });
 
-    it("shows knowledge file counts in kf row", () => {
+    it("shows knowledge file counts from queue stats", () => {
       const deps = makeDeps();
       deps.S.progress.knowledgeFilesExported = [
         { projectId: "p1", projectName: "P1", fileId: "f1", fileName: "a.txt", fileType: "text", fileSize: 10 },
         { projectId: "p1", projectName: "P1", fileId: "f2", fileName: "b.txt", fileType: "text", fileSize: 10 },
       ];
-      deps.S.progress.knowledgeFilesPending = [
-        { projectId: "p1", projectName: "P1", fileId: "f3", fileName: "c.txt", fileType: "text", fileSize: 20 },
-      ];
       deps.S.progress.knowledgeFilesDead = [
         { projectId: "p1", projectName: "P1", fileId: "f4", fileName: "d.txt", fileType: "text", fileSize: 30, lastError: "err" },
       ];
-      const ui = createUI(deps);
+      const ui = createUI(deps) as any;
       ui.inject();
+      ui.setExporter({
+        scanPromise: null,
+        start: vi.fn(),
+        stop: vi.fn(),
+        rescan: vi.fn(),
+        chatQueue: { setConcurrency: vi.fn(), stats: { pending: 0, active: 0, done: 0, dead: 0 } },
+        attachmentQueue: { setConcurrency: vi.fn(), stats: { pending: 0, active: 0, done: 0, dead: 0 } },
+        knowledgeQueue: { setConcurrency: vi.fn(), stats: { pending: 1, active: 0, done: 2, dead: 1 } },
+      });
       ui.renderAll();
-      // 2 exported out of 4 total
+      // 2 exported out of 2 + 1 in-flight + 1 dead = 4
       expect(document.getElementById("cvz-kf-count")!.textContent).toBe("2/4");
       expect(document.getElementById("cvz-kf-dead")!.textContent).toBe("1");
     });
 
-    it("shows file download counts in file row", () => {
+    it("shows file download counts from queue stats", () => {
       const deps = makeDeps();
       deps.S.progress.fileDoneCount = 42;
-      deps.S.progress.filePending = [
-        { id: "f1", name: "test.png", conversationId: "c1", conversationTitle: "C1" },
-      ];
       deps.S.progress.fileDead = [];
-      const ui = createUI(deps);
+      const ui = createUI(deps) as any;
       ui.inject();
+      ui.setExporter({
+        scanPromise: null,
+        start: vi.fn(),
+        stop: vi.fn(),
+        rescan: vi.fn(),
+        chatQueue: { setConcurrency: vi.fn(), stats: { pending: 0, active: 0, done: 0, dead: 0 } },
+        attachmentQueue: { setConcurrency: vi.fn(), stats: { pending: 3, active: 1, done: 42, dead: 0 } },
+        knowledgeQueue: { setConcurrency: vi.fn(), stats: { pending: 0, active: 0, done: 0, dead: 0 } },
+      });
       ui.renderAll();
-      // 42 done out of 42+1=43 total
-      expect(document.getElementById("cvz-file-count")!.textContent).toBe("42/43");
+      // 42 done out of 42 + 4 in-flight = 46
+      expect(document.getElementById("cvz-file-count")!.textContent).toBe("42/46");
       expect(document.getElementById("cvz-file-dead")!.textContent).toBe("0");
     });
 
@@ -445,15 +480,16 @@ describe("createUI", () => {
       deps.S.run.isRunning = true;
       const ui = createUI(deps) as any;
       ui.inject();
-      const mockQueue = { setConcurrency: vi.fn() };
+      const zeroStats = { pending: 0, active: 0, done: 0, dead: 0 };
+      const mockQueue = { setConcurrency: vi.fn(), stats: zeroStats };
       ui.setExporter({
         scanPromise: null,
         start: vi.fn(),
         stop: vi.fn(),
         rescan: vi.fn(),
         chatQueue: mockQueue,
-        attachmentQueue: { setConcurrency: vi.fn() },
-        knowledgeQueue: { setConcurrency: vi.fn() },
+        attachmentQueue: { setConcurrency: vi.fn(), stats: zeroStats },
+        knowledgeQueue: { setConcurrency: vi.fn(), stats: zeroStats },
       });
       const input = document.getElementById("cvz-conc-chat") as HTMLInputElement;
       input.value = "7";

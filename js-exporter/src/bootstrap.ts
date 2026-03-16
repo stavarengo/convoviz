@@ -73,6 +73,13 @@ export function bootstrap(deps: BootstrapDeps): BootstrapResult {
 
   const eventBus = createEventBus();
 
+  // Keep S.scan.total in sync with the general scanner's API total
+  eventBus.on("scanner-progress", (payload) => {
+    if (payload.scannerId === "general") {
+      S.scan.total = payload.total;
+    }
+  });
+
   const pause = clamp(
     parseInt(String(S.settings.pause), 10) || 300,
     0,

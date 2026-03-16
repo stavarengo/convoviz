@@ -43,6 +43,7 @@ export interface UI {
 
 interface QueueRef {
   setConcurrency(n: number): void;
+  readonly stats: { pending: number; active: number; done: number; dead: number };
 }
 
 export interface ExporterRef {
@@ -436,12 +437,14 @@ export const createUI = (deps: UIDeps): UI => {
     renderAll(): void {
       if (!ui.container) return;
       const exported = Object.keys(S.progress.exported || {}).length;
-      const pending = (S.progress.pending || []).length;
       const dead = (S.progress.dead || []).length;
       const scanning = !!(_exporter && _exporter.scanPromise);
 
-      // Chat row
-      const chatTotal = S.scan.total ? S.scan.total : exported + pending;
+      // Chat row — total from scanner API; fallback to exported + queue in-flight + dead
+      const chatInFlight = _exporter?.chatQueue?.stats
+        ? _exporter.chatQueue.stats.pending + _exporter.chatQueue.stats.active
+        : 0;
+      const chatTotal = S.scan.total ? S.scan.total : (exported + chatInFlight + dead);
       const chatLabel = scanning
         ? exported + "/" + chatTotal + "\u2026"
         : exported + "/" + chatTotal;
@@ -452,11 +455,13 @@ export const createUI = (deps: UIDeps): UI => {
       const chatPct = chatTotal ? (exported / chatTotal) * 100 : 0;
       _setBarWidth("cvz-chat-bar", chatPct);
 
-      // File row
+      // File row — total from done + queue in-flight + dead
       const fileDone = S.progress.fileDoneCount || 0;
-      const filePending = (S.progress.filePending || []).length;
+      const fileInFlight = _exporter?.attachmentQueue?.stats
+        ? _exporter.attachmentQueue.stats.pending + _exporter.attachmentQueue.stats.active
+        : 0;
       const fileDead = (S.progress.fileDead || []).length;
-      const fileTotal = fileDone + filePending + fileDead;
+      const fileTotal = fileDone + fileInFlight + fileDead;
       const fileLabel = fileTotal
         ? fileDone + "/" + fileTotal
         : String(fileDone);
@@ -467,11 +472,13 @@ export const createUI = (deps: UIDeps): UI => {
       const filePct = fileTotal ? (fileDone / fileTotal) * 100 : 0;
       _setBarWidth("cvz-file-bar", filePct);
 
-      // Knowledge row
+      // Knowledge row — total from done + queue in-flight + dead
       const kfExp = (S.progress.knowledgeFilesExported || []).length;
-      const kfPend = (S.progress.knowledgeFilesPending || []).length;
+      const kfInFlight = _exporter?.knowledgeQueue?.stats
+        ? _exporter.knowledgeQueue.stats.pending + _exporter.knowledgeQueue.stats.active
+        : 0;
       const kfDead = (S.progress.knowledgeFilesDead || []).length;
-      const kfTotal = kfExp + kfPend + kfDead;
+      const kfTotal = kfExp + kfInFlight + kfDead;
       const kfLabel = kfTotal
         ? kfExp + "/" + kfTotal
         : String(kfExp);
