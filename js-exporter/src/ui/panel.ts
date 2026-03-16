@@ -1,10 +1,14 @@
 import type { ExportState, ProjectInfo } from "../types";
+import type { LogLevel } from "../state/logger";
+import { formatLogLine } from "../state/logger";
 import type { Net } from "../net/net";
 import type { TaskList } from "./task-list";
 import { VER } from "../state/defaults";
 import { isUsingLocalStorage } from "../state/store";
 import { clamp, fmtSize } from "../utils/format";
 import { scanProjects as defaultScanProjects } from "../scan/projects";
+
+type LogEntryLike = { timestamp: number; session: string; level: LogLevel; category: string; message: string; context?: Record<string, unknown> };
 
 interface ScanNet {
   fetchJson(
@@ -15,13 +19,16 @@ interface ScanNet {
 
 export interface UIDeps {
   S: ExportState;
-  addLog: (msg: string) => void;
+  log: (level: LogLevel, category: string, message: string, context?: Record<string, unknown>) => void;
   net: Net;
   taskList: TaskList;
   saveDebounce: (immediate: boolean) => void;
   getAccumulatedSize?: () => Promise<number>;
   onDownload?: () => Promise<void>;
   onReset?: () => Promise<void>;
+  getSessionLogs?: () => LogEntryLike[];
+  getLogCount?: () => Promise<number>;
+  onDownloadLogs?: () => Promise<void>;
   scanProjects?: (
     net: ScanNet,
     signal: AbortSignal,
@@ -71,7 +78,7 @@ const _statsRow = (label: string, prefix: string, barColor: string): string =>
   '</div>';
 
 export const createUI = (deps: UIDeps): UI => {
-  const { S, addLog, net, taskList, saveDebounce } = deps;
+  const { S, log, net, taskList, saveDebounce } = deps;
   const _scanProjects = deps.scanProjects || defaultScanProjects;
   let _exporter: ExporterRef | null = null;
   let _maximized = false;
@@ -115,7 +122,7 @@ export const createUI = (deps: UIDeps): UI => {
     if (_projectLoadPromise) return;
     const ac = new AbortController();
     _projectLoadAbort = ac;
-    addLog("Loading projects\u2026");
+    log("info", "scan", "Loading projects");
     const p = net
       .getToken(ac.signal)
       .then(() =>
@@ -137,16 +144,16 @@ export const createUI = (deps: UIDeps): UI => {
         S.projects = projects;
         S.scan.totalProjects = projects.length;
         saveDebounce(true);
-        addLog("Found " + projects.length + " projects.");
+        log("info", "scan", "Found " + projects.length + " projects", { count: projects.length });
       })
       .catch((e: unknown) => {
         const err = e as { name?: string; message?: string };
         if (err && err.name === "AbortError") {
-          addLog("Project load cancelled.");
+          log("info", "scan", "Project load cancelled");
         } else {
-          addLog(
-            "Failed to load projects: " + (err && err.message ? err.message : String(e)),
-          );
+          log("error", "scan", "Failed to load projects", {
+            error: err && err.message ? err.message : String(e),
+          });
         }
       })
       .then(() => {
@@ -178,7 +185,7 @@ export const createUI = (deps: UIDeps): UI => {
         const q = _exporter[queueKey];
         if (q) q.setConcurrency(clamped);
       }
-      addLog(label + " concurrency set to " + clamped + ".");
+      log("info", "ui", "Concurrency changed", { queue: label.toLowerCase(), value: clamped });
       saveDebounce(true);
       ui.renderAll();
     });
@@ -284,6 +291,7 @@ export const createUI = (deps: UIDeps): UI => {
         '<div style="margin-top:10px;display:flex;justify-content:space-between;gap:8px;">' +
         '<button id="cvz-reset" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Reset</button>' +
         '<button id="cvz-download" data-testid="cvz-download" style="display:none;padding:6px 10px;border-radius:8px;border:1px solid rgba(16,163,127,0.6);background:rgba(16,163,127,0.15);color:#ececf1;cursor:pointer;font-size:11px;font-weight:600;">Download</button>' +
+        '<button id="cvz-dllogs" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Logs (0)</button>' +
         '<button id="cvz-dlstate" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:#ececf1;cursor:pointer;font-size:11px;">Export state</button>' +
         "</div>";
 
@@ -347,6 +355,10 @@ export const createUI = (deps: UIDeps): UI => {
         if (deps.onDownload) deps.onDownload();
       });
 
+      d.querySelector("#cvz-dllogs")!.addEventListener("click", () => {
+        if (deps.onDownloadLogs) deps.onDownloadLogs();
+      });
+
       d.querySelector("#cvz-dlstate")!.addEventListener("click", () => {
         const blob = new Blob([JSON.stringify(S, null, 2)], {
           type: "application/json",
@@ -371,14 +383,14 @@ export const createUI = (deps: UIDeps): UI => {
       singleProjCheck.addEventListener("change", () => {
         if (S.run.isRunning) {
           singleProjCheck.checked = !!S.settings.filterGizmoId;
-          addLog("Stop first to change project filter.");
+          log("warn", "ui", "Stop first to change project filter.");
           return;
         }
         if (!singleProjCheck.checked) {
           S.settings.filterGizmoId = null;
           projSelect.style.display = "none";
           saveDebounce(true);
-          addLog("Project filter cleared. Will export all conversations.");
+          log("info", "ui", "Project filter cleared");
           ui.renderAll();
         } else {
           projSelect.style.display = "";
@@ -397,7 +409,7 @@ export const createUI = (deps: UIDeps): UI => {
       projSelect.addEventListener("change", () => {
         if (S.run.isRunning) {
           projSelect.value = S.settings.filterGizmoId || "";
-          addLog("Stop first to change project filter.");
+          log("warn", "ui", "Stop first to change project filter.");
           return;
         }
         S.settings.filterGizmoId = projSelect.value || null;
@@ -405,7 +417,7 @@ export const createUI = (deps: UIDeps): UI => {
         if (projSelect.value) {
           const name =
             projSelect.options[projSelect.selectedIndex].textContent;
-          addLog("Filter set to project: " + name);
+          log("info", "ui", "Filter set to project", { projectName: name, gizmoId: projSelect.value });
         }
         ui.renderAll();
       });
@@ -426,7 +438,16 @@ export const createUI = (deps: UIDeps): UI => {
         ui.container &&
         (ui.container.querySelector("#cvz-log") as HTMLTextAreaElement | null);
       if (!el) return;
-      el.value = (S.logs || []).slice(-200).join("\n");
+      if (deps.getSessionLogs) {
+        const entries = deps.getSessionLogs();
+        const lines: string[] = [];
+        for (let i = 0; i < entries.length; i++) {
+          const e = entries[i];
+          if (e.level === "debug") continue;
+          lines.push(formatLogLine(e));
+        }
+        el.value = lines.join("\n");
+      }
       el.scrollTop = el.scrollHeight;
     },
 
@@ -499,6 +520,13 @@ export const createUI = (deps: UIDeps): UI => {
 
       ui.renderLogs();
       ui.updateDownloadButton();
+      // Update log count on the download logs button
+      if (deps.getLogCount) {
+        deps.getLogCount().then((count: number) => {
+          const btn = ui.container && (ui.container.querySelector("#cvz-dllogs") as HTMLButtonElement | null);
+          if (btn) btn.textContent = "Logs (" + count.toLocaleString() + ")";
+        }).catch(() => {});
+      }
       taskList.render();
     },
 

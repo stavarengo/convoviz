@@ -58,6 +58,5 @@ export const migrateV2toV3 = (v2: any): ExportState => {
       newPending: 0,
       pendingDelta: 0,
     },
-    logs: v2.logs || [],
   };
 };

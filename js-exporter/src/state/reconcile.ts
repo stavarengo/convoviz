@@ -1,16 +1,17 @@
 import type { ExportState } from "../types";
+import type { LogLevel } from "./logger";
 
 export interface ReconcileDeps {
   S: ExportState;
   getAllConvKeys: () => Promise<string[]>;
   saveDebounce: (immediate: boolean) => void;
-  addLog: (msg: string) => void;
+  log: (level: LogLevel, category: string, message: string, context?: Record<string, unknown>) => void;
 }
 
 export const reconcileExportState = async (
   deps: ReconcileDeps,
 ): Promise<void> => {
-  const { S, getAllConvKeys, saveDebounce, addLog } = deps;
+  const { S, getAllConvKeys, saveDebounce, log } = deps;
   const idbKeys = await getAllConvKeys();
   if (!idbKeys.length) return;
 
@@ -35,9 +36,10 @@ export const reconcileExportState = async (
   );
 
   saveDebounce(true);
-  addLog(
-    "Reconciled " +
-      reconciledIds.size +
-      " conversation(s) from previous session.",
+  log(
+    "info",
+    "state",
+    "Reconciled " + reconciledIds.size + " conversation(s) from previous session",
+    { count: reconciledIds.size },
   );
 };

@@ -13,7 +13,7 @@ const createMockDeps = () => {
   return {
     net,
     S: defaultState(),
-    addLog: vi.fn(),
+    log: vi.fn(),
     setStatus: vi.fn(),
   };
 };
@@ -24,7 +24,7 @@ describe("scanConversations", () => {
     deps.net.fetchJson.mockResolvedValue({ items: [] });
     const ac = new AbortController();
 
-    await scanConversations(deps.net, deps.S, ac.signal, null, null, deps.addLog, deps.setStatus);
+    await scanConversations(deps.net, deps.S, ac.signal, null, null, deps.log, deps.setStatus);
     expect(deps.net.getToken).toHaveBeenCalledWith(ac.signal);
   });
 
@@ -49,7 +49,7 @@ describe("scanConversations", () => {
       ac.signal,
       null,
       null,
-      deps.addLog,
+      deps.log,
       deps.setStatus,
     );
 
@@ -74,7 +74,7 @@ describe("scanConversations", () => {
       ac.signal,
       null,
       null,
-      deps.addLog,
+      deps.log,
       deps.setStatus,
     );
 
@@ -99,7 +99,7 @@ describe("scanConversations", () => {
       ac.signal,
       null,
       null,
-      deps.addLog,
+      deps.log,
       deps.setStatus,
     );
 
@@ -133,13 +133,18 @@ describe("scanConversations", () => {
       ac.signal,
       null,
       knownIds,
-      deps.addLog,
+      deps.log,
       deps.setStatus,
     );
 
     // Should stop after 2 consecutive pages of all-known items
     expect(deps.net.fetchJson).toHaveBeenCalledTimes(2);
-    expect(deps.addLog).toHaveBeenCalledWith(expect.stringContaining("early-exit"));
+    expect(deps.log).toHaveBeenCalledWith(
+      "info",
+      "scan",
+      expect.stringContaining("early-exit"),
+      expect.any(Object),
+    );
   });
 
   it("resets consecutiveKnownPages when new items are found", async () => {
@@ -163,7 +168,7 @@ describe("scanConversations", () => {
       .mockResolvedValueOnce({ items: page2 }); // partial page - stops
     const ac = new AbortController();
 
-    await scanConversations(deps.net, deps.S, ac.signal, null, knownIds, deps.addLog, deps.setStatus);
+    await scanConversations(deps.net, deps.S, ac.signal, null, knownIds, deps.log, deps.setStatus);
 
     // 2 calls: first known (count=1), second has new (resets) but partial so stops
     expect(deps.net.fetchJson).toHaveBeenCalledTimes(2);
@@ -178,7 +183,7 @@ describe("scanConversations", () => {
       });
     const ac = new AbortController();
 
-    await scanConversations(deps.net, deps.S, ac.signal, onPage, null, deps.addLog, deps.setStatus);
+    await scanConversations(deps.net, deps.S, ac.signal, onPage, null, deps.log, deps.setStatus);
 
     expect(onPage).toHaveBeenCalledTimes(1);
     expect(onPage).toHaveBeenCalledWith([
@@ -203,7 +208,7 @@ describe("scanConversations", () => {
       ac.signal,
       null,
       null,
-      deps.addLog,
+      deps.log,
       deps.setStatus,
     );
 
@@ -230,7 +235,7 @@ describe("scanConversations", () => {
       ac.signal,
       null,
       null,
-      deps.addLog,
+      deps.log,
       deps.setStatus,
     );
 

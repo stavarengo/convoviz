@@ -1,5 +1,6 @@
 import type { ExportState, PendingItem, FileRef } from "./types";
 import type { FileMeta } from "./state/export-blobs";
+import type { LogLevel } from "./state/logger";
 import type { AttachmentItem } from "./export/attachment-worker";
 import type { KnowledgeFileItem } from "./export/knowledge-worker";
 import type { TaskList } from "./ui/task-list";
@@ -41,7 +42,7 @@ export interface BootstrapDeps {
     totalSize(): Promise<number>;
   };
   taskList: TaskList;
-  addLog: (msg: string) => void;
+  log: (level: LogLevel, category: string, message: string, context?: Record<string, unknown>) => void;
   saveDebounce: (immediate: boolean) => void;
   extractFileRefs: (chatJson: any) => FileRef[];
 }
@@ -66,12 +67,16 @@ export function bootstrap(deps: BootstrapDeps): BootstrapResult {
     discoveryStore,
     exportBlobStore,
     taskList,
-    addLog,
+    log,
     saveDebounce,
     extractFileRefs,
   } = deps;
 
-  const eventBus = createEventBus();
+  const eventBus = createEventBus((event, err) => {
+    log("error", "sys", `EventBus: listener for "${String(event)}" threw`, {
+      error: String((err as any)?.message || err),
+    });
+  });
 
   // Keep S.scan.total in sync with the general scanner's API total
   eventBus.on("scanner-progress", (payload) => {
@@ -109,20 +114,23 @@ export function bootstrap(deps: BootstrapDeps): BootstrapResult {
       onItemFailed: (item, error, attempt) => {
         S.progress.fileFailCounts[item.id] = attempt;
         taskList.update("file-" + item.id, { status: "failed", error });
-        addLog(
-          "\u2717 File " + (item.name || item.id) +
-          " (attempt " + attempt + "): " + error,
-        );
+        log("warn", "file", "File download failed, retrying", {
+          fileId: item.id,
+          fileName: item.name,
+          attempt,
+          error,
+        });
         saveDebounce(false);
       },
       onItemDead: (item, error) => {
         S.progress.fileDead = (S.progress.fileDead || [])
           .concat([{ ...item, lastError: error }])
           .slice(-500);
-        addLog(
-          "\u2717 File dead-lettered: " + (item.name || item.id) +
-          ": " + error,
-        );
+        log("error", "file", "File dead-lettered", {
+          fileId: item.id,
+          fileName: item.name,
+          error,
+        });
         saveDebounce(false);
       },
       onStatsChanged: () => {
@@ -162,20 +170,23 @@ export function bootstrap(deps: BootstrapDeps): BootstrapResult {
               (p) => p.gizmoId === item.gizmo_id,
             ) || ({} as any)).name
           : null;
-        const title = projName
-          ? "[" + projName + "] " + (item.title || item.id)
-          : item.title || item.id;
         taskList.update("conv-" + item.id, { status: "done", detail: null });
-        addLog("\u2713 " + title);
+        log("info", "chat", "Conversation exported", {
+          conversationId: item.id,
+          title: item.title || item.id,
+          projectName: projName,
+        });
         saveDebounce(false);
       },
       onItemFailed: (item, error, attempt) => {
         S.progress.failCounts[item.id] = attempt;
         taskList.update("conv-" + item.id, { status: "failed", error });
-        addLog(
-          "\u2717 " + (item.title || item.id) +
-          " (attempt " + attempt + "): " + error,
-        );
+        log("warn", "chat", "Export failed, retrying", {
+          conversationId: item.id,
+          title: item.title || item.id,
+          attempt,
+          error,
+        });
         saveDebounce(false);
       },
       onItemDead: (item, error) => {
@@ -185,10 +196,11 @@ export function bootstrap(deps: BootstrapDeps): BootstrapResult {
         S.progress.dead = (S.progress.dead || [])
           .concat([{ ...item, lastError: error }])
           .slice(-500);
-        addLog(
-          "\u2717 Dead-lettered: " + (item.title || item.id) +
-          ": " + error,
-        );
+        log("error", "chat", "Dead-lettered", {
+          conversationId: item.id,
+          title: item.title || item.id,
+          error,
+        });
         saveDebounce(false);
       },
       onStatsChanged: () => {
@@ -226,18 +238,23 @@ export function bootstrap(deps: BootstrapDeps): BootstrapResult {
         S.stats.knowledgeFilesDownloaded =
           (S.stats.knowledgeFilesDownloaded || 0) + 1;
         taskList.update("kf-" + item.fileId, { status: "done", detail: null });
-        addLog(
-          "\u2713 KF [" + item.projectName + "] " + item.fileName,
-        );
+        log("info", "kf", "Knowledge file exported", {
+          projectName: item.projectName,
+          fileName: item.fileName,
+          fileId: item.fileId,
+        });
         saveDebounce(false);
       },
       onItemFailed: (item, error, attempt) => {
         S.progress.knowledgeFilesFailCounts[item.fileId] = attempt;
         taskList.update("kf-" + item.fileId, { status: "failed", error });
-        addLog(
-          "\u2717 KF [" + item.projectName + "] " + item.fileName +
-          " (attempt " + attempt + "): " + error,
-        );
+        log("warn", "kf", "Knowledge file failed, retrying", {
+          projectName: item.projectName,
+          fileName: item.fileName,
+          fileId: item.fileId,
+          attempt,
+          error,
+        });
         saveDebounce(false);
       },
       onItemDead: (item, error) => {
@@ -250,10 +267,12 @@ export function bootstrap(deps: BootstrapDeps): BootstrapResult {
         )
           .concat([{ ...item, lastError: error }])
           .slice(-500);
-        addLog(
-          "\u2717 KF dead-lettered: [" + item.projectName + "] " +
-          item.fileName + ": " + error,
-        );
+        log("error", "kf", "Knowledge file dead-lettered", {
+          projectName: item.projectName,
+          fileName: item.fileName,
+          fileId: item.fileId,
+          error,
+        });
         saveDebounce(false);
       },
       onStatsChanged: () => {
@@ -346,7 +365,7 @@ export function bootstrap(deps: BootstrapDeps): BootstrapResult {
     // Use the shared scan abort signal, or create a standalone one
     const signal = _scanAbortSignal ?? new AbortController().signal;
     const promise = projectConvScanner.start(signal).catch((e: any) => {
-      if (e && e.name !== "AbortError") console.error(e);
+      if (e && e.name !== "AbortError") log("error", "scan", "Project conversation scanner error", { error: String(e && e.message || e), gizmoId: payload.gizmoId });
     });
     _spawnedScannerPromises.push(promise);
 

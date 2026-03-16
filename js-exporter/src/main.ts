@@ -1,8 +1,9 @@
-import type { ExportState } from "./types";
-import { initIdb, Store } from "./state/store";
+import { initIdb, Store, isUsingLocalStorage } from "./state/store";
 import { initExportBlobsIdb, ExportBlobStore } from "./state/export-blobs";
 import { KEY, VER } from "./state/defaults";
 import { createSaveDebounce } from "./state/debounce";
+import { initLogger, log, getSessionId, getSessionLogs, getLogCount, getAllLogs, clearLogs, serializeLogsJsonl } from "./state/logger";
+import { registerGlobalErrorHandlers } from "./state/global-error-handlers";
 import { createNet } from "./net/net";
 import { createTaskList } from "./ui/task-list";
 import { createUI } from "./ui/panel";
@@ -23,43 +24,36 @@ export const assertOnChatGPT = (): void => {
     );
 };
 
-export const createAddLog = (
-  S: ExportState,
-  saveDebounce: (immediate: boolean) => void,
-  renderLogs: () => void,
-): ((msg: string) => void) => {
-  return (msg: string): void => {
-    const stamp = new Date().toLocaleTimeString();
-    const line = "[" + stamp + "] " + msg;
-    S.logs.push(line);
-    if (S.logs.length > 200) S.logs = S.logs.slice(-200);
-    saveDebounce(false);
-    renderLogs();
-  };
-};
-
 (async () => {
+  // Register global error handlers before any async work
+  registerGlobalErrorHandlers(log);
+
   try {
     assertOnChatGPT();
     await initIdb();
     await initExportBlobsIdb();
+    await initLogger();
+
+    // Emit startup log entry
+    log("info", "sys", "Session started", {
+      version: VER,
+      sessionId: getSessionId(),
+      storageBackend: isUsingLocalStorage() ? "localStorage" : "idb",
+      userAgent: navigator.userAgent,
+    });
+
     let S = await Store.load();
 
     const saveDebounce = createSaveDebounce(Store, S);
 
     const taskList = createTaskList();
 
-    // addLog needs renderLogs from UI, but UI needs addLog.
-    // Resolve the circular dependency: addLog calls renderLogs via a late-bound reference.
-    let _renderLogs = (): void => {};
-
     // Late-bound reference for discovery store (created after UI)
     let _discoveryStore: { destroy(): Promise<void> } | null = null;
-    const addLog = createAddLog(S, saveDebounce, () => _renderLogs());
 
     const net = createNet({
       S,
-      addLog,
+      log,
       setStatus: (msg: string) => ui.setStatus(msg),
       saveDebounce,
     });
@@ -73,7 +67,7 @@ export const createAddLog = (
 
     const ui = createUI({
       S,
-      addLog,
+      log,
       net,
       taskList,
       saveDebounce,
@@ -86,17 +80,27 @@ export const createAddLog = (
         localStorage.removeItem(KEY);
         location.reload();
       },
+      getSessionLogs,
+      getLogCount,
+      onDownloadLogs: async () => {
+        const entries = await getAllLogs();
+        const jsonl = serializeLogsJsonl(entries);
+        const blob = new Blob([jsonl], { type: "application/x-ndjson" });
+        const now = new Date();
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const filename = "cvz-logs-" +
+          now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()) +
+          "-" + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds()) + ".jsonl";
+        net.download(blob, filename);
+      },
     });
-
-    // Now wire the late-bound renderLogs reference
-    _renderLogs = () => ui.renderLogs();
 
     // Reconcile IDB export data with state after a potential page reload.
     await reconcileExportState({
       S,
       getAllConvKeys: () => ExportBlobStore.getAllConvKeys(),
       saveDebounce,
-      addLog,
+      log,
     });
 
     // Initialize discovery store and seed from existing export state
@@ -112,7 +116,7 @@ export const createAddLog = (
       discoveryStore,
       exportBlobStore: ExportBlobStore,
       taskList,
-      addLog,
+      log,
       saveDebounce,
       extractFileRefs,
     });
@@ -122,7 +126,7 @@ export const createAddLog = (
       ...components,
       S,
       ui,
-      addLog,
+      log,
       saveDebounce,
       assertOnChatGPT,
       net,
@@ -145,6 +149,10 @@ export const createAddLog = (
     // Expose convenience aliases per FR-9
     (window as any).__cvz_state = S;
     (window as any).__cvz_stop = () => coordinator.stop();
+    (window as any).__cvz_clearLogs = async () => {
+      await clearLogs();
+      console.log("Convoviz: log store cleared");
+    };
     (window as any).__cvz_reset = async () => {
       await Store.destroy();
       await ExportBlobStore.destroy();
@@ -158,26 +166,20 @@ export const createAddLog = (
       S.run.isRunning = false;
       S.run.lastError =
         S.run.lastError || "Previous run interrupted (reload?)";
-      addLog(
-        "Detected interrupted run. State preserved; click Start to resume.",
-      );
+      log("warn", "sys", "Detected interrupted run. State preserved; click Start to resume.");
       saveDebounce(true);
       ui.renderAll();
     }
 
-    // Initial logs and render
-    S.logs = [];
-    addLog(VER);
-    addLog(
-      "UI ready. Exported " +
-        Object.keys(S.progress.exported || {}).length +
-        ", pending " +
-        (S.progress.pending || []).length +
-        ". Click Rescan then Start.",
-    );
+    // Initial log and render
+    log("info", "sys", "UI ready", {
+      version: VER,
+      exported: Object.keys(S.progress.exported || {}).length,
+      pending: (S.progress.pending || []).length,
+    });
     ui.renderAll();
   } catch (e: any) {
-    console.error(e);
+    log("error", "sys", "Bookmarklet startup error", { error: String((e && e.message) || e) });
     alert("Convoviz bookmarklet error: " + ((e && e.message) || e));
   }
 })();

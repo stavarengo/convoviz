@@ -101,7 +101,7 @@ const makeDeps = () => {
     discoveryStore: createMockDiscoveryStore(),
     exportBlobStore: createMockExportBlobStore(),
     taskList: createMockTaskList(),
-    addLog: vi.fn(),
+    log: vi.fn(),
     saveDebounce: vi.fn(),
     extractFileRefs: vi.fn().mockReturnValue([]),
     assertOnChatGPT: vi.fn(),
@@ -153,7 +153,7 @@ describe("coordinator (event-driven exporter)", () => {
         discoveryStore: deps.discoveryStore,
         exportBlobStore: deps.exportBlobStore,
         taskList: deps.taskList,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         extractFileRefs: deps.extractFileRefs,
       });
@@ -162,7 +162,7 @@ describe("coordinator (event-driven exporter)", () => {
         ...components,
         S: deps.S,
         ui: deps.ui,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         assertOnChatGPT: deps.assertOnChatGPT,
         net: deps.net,
@@ -206,7 +206,7 @@ describe("coordinator (event-driven exporter)", () => {
         discoveryStore: deps.discoveryStore,
         exportBlobStore: deps.exportBlobStore,
         taskList: deps.taskList,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         extractFileRefs: deps.extractFileRefs,
       });
@@ -215,7 +215,7 @@ describe("coordinator (event-driven exporter)", () => {
         ...components,
         S: deps.S,
         ui: deps.ui,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         assertOnChatGPT: deps.assertOnChatGPT,
         net: deps.net,
@@ -254,7 +254,7 @@ describe("coordinator (event-driven exporter)", () => {
         discoveryStore: deps.discoveryStore,
         exportBlobStore: deps.exportBlobStore,
         taskList: deps.taskList,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         extractFileRefs: deps.extractFileRefs,
       });
@@ -263,7 +263,7 @@ describe("coordinator (event-driven exporter)", () => {
         ...components,
         S: deps.S,
         ui: deps.ui,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         assertOnChatGPT: deps.assertOnChatGPT,
         net: deps.net,
@@ -290,7 +290,7 @@ describe("coordinator (event-driven exporter)", () => {
         discoveryStore: deps.discoveryStore,
         exportBlobStore: deps.exportBlobStore,
         taskList: deps.taskList,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         extractFileRefs: deps.extractFileRefs,
       });
@@ -299,7 +299,7 @@ describe("coordinator (event-driven exporter)", () => {
         ...components,
         S: deps.S,
         ui: deps.ui,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         assertOnChatGPT: deps.assertOnChatGPT,
         net: deps.net,
@@ -307,7 +307,7 @@ describe("coordinator (event-driven exporter)", () => {
 
       await coordinator.start();
 
-      expect(deps.addLog).toHaveBeenCalledWith("Already running.");
+      expect(deps.log).toHaveBeenCalledWith("warn", "sys", "Already running.");
     });
   });
 
@@ -321,7 +321,7 @@ describe("coordinator (event-driven exporter)", () => {
         discoveryStore: deps.discoveryStore,
         exportBlobStore: deps.exportBlobStore,
         taskList: deps.taskList,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         extractFileRefs: deps.extractFileRefs,
       });
@@ -330,7 +330,7 @@ describe("coordinator (event-driven exporter)", () => {
         ...components,
         S: deps.S,
         ui: deps.ui,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         assertOnChatGPT: deps.assertOnChatGPT,
         net: deps.net,
@@ -338,7 +338,7 @@ describe("coordinator (event-driven exporter)", () => {
 
       coordinator.stop();
 
-      expect(deps.addLog).toHaveBeenCalledWith("Not running.");
+      expect(deps.log).toHaveBeenCalledWith("info", "sys", "Not running.");
     });
   });
 
@@ -363,7 +363,7 @@ describe("coordinator (event-driven exporter)", () => {
         discoveryStore: deps.discoveryStore,
         exportBlobStore: deps.exportBlobStore,
         taskList: deps.taskList,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         extractFileRefs: deps.extractFileRefs,
       });
@@ -372,7 +372,7 @@ describe("coordinator (event-driven exporter)", () => {
         ...components,
         S: deps.S,
         ui: deps.ui,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         assertOnChatGPT: deps.assertOnChatGPT,
         net: deps.net,
@@ -424,7 +424,7 @@ describe("coordinator (event-driven exporter)", () => {
         discoveryStore: deps.discoveryStore,
         exportBlobStore: deps.exportBlobStore,
         taskList: deps.taskList,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         extractFileRefs: deps.extractFileRefs,
       });
@@ -433,7 +433,7 @@ describe("coordinator (event-driven exporter)", () => {
         ...components,
         S: deps.S,
         ui: deps.ui,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         assertOnChatGPT: deps.assertOnChatGPT,
         net: deps.net,
@@ -497,7 +497,7 @@ describe("coordinator (event-driven exporter)", () => {
         discoveryStore: deps.discoveryStore,
         exportBlobStore: deps.exportBlobStore,
         taskList: deps.taskList,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         extractFileRefs: deps.extractFileRefs,
       });
@@ -508,7 +508,7 @@ describe("coordinator (event-driven exporter)", () => {
         ...components,
         S: deps.S,
         ui: deps.ui,
-        addLog: deps.addLog,
+        log: deps.log,
         saveDebounce: deps.saveDebounce,
         assertOnChatGPT: deps.assertOnChatGPT,
         net: deps.net,

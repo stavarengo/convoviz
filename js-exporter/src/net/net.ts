@@ -1,4 +1,5 @@
 import type { ExportState } from "../types";
+import type { LogLevel } from "../state/logger";
 import { now } from "../utils/format";
 import { fmtMs } from "../utils/format";
 import { sleep } from "./sleep";
@@ -13,7 +14,7 @@ export interface FetchOpts {
 
 export interface NetDeps {
   S: ExportState;
-  addLog: (msg: string) => void;
+  log: (level: LogLevel, category: string, message: string, context?: Record<string, unknown>) => void;
   setStatus: (msg: string) => void;
   saveDebounce: (immediate: boolean) => void;
 }
@@ -30,7 +31,7 @@ export interface Net {
 }
 
 export const createNet = (deps: NetDeps): Net => {
-  const { S, addLog, setStatus, saveDebounce } = deps;
+  const { S, log, setStatus, saveDebounce } = deps;
 
   const net: Net = {
     token: "",
@@ -77,7 +78,7 @@ export const createNet = (deps: NetDeps): Net => {
           signal,
         });
         if (resp.status === 401 && auth && attempt < 1) {
-          addLog("Auth 401, refreshing token\u2026");
+          log("warn", "net", "Auth 401, refreshing token");
           await net.getToken(signal);
           headers.set("Authorization", "Bearer " + net.token);
           attempt++;
@@ -102,9 +103,11 @@ export const createNet = (deps: NetDeps): Net => {
           S.run.backoffCount = (S.run.backoffCount || 0) + 1;
           saveDebounce(true);
           setStatus("Rate limited (429) \u2192 sleeping " + fmtMs(waitMs));
-          addLog(
-            "HTTP 429. Sleeping " + fmtMs(waitMs) + " then retrying\u2026",
-          );
+          log("warn", "net", "Rate limited", {
+            status: 429,
+            retryAfter: waitMs,
+            backoffCount: S.run.backoffCount,
+          });
           await sleep(waitMs, signal);
           continue;
         }
@@ -121,9 +124,10 @@ export const createNet = (deps: NetDeps): Net => {
         if ([502, 503, 504].includes(resp.status) && attempt < 3) {
           attempt++;
           const w = 1000 * attempt;
-          addLog(
-            "HTTP " + resp.status + " retrying in " + fmtMs(w) + "\u2026",
-          );
+          log("warn", "net", "HTTP " + resp.status + ", retrying in " + fmtMs(w), {
+            status: resp.status,
+            attempt,
+          });
           await sleep(w, signal);
           continue;
         }

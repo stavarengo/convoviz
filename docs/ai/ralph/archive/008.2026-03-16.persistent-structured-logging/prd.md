@@ -1,7 +1,7 @@
 # PRD: Persistent Structured Logging for JS Exporter
 
 **Project:** Convoviz
-**Branch:**
+**Branch:** ralph/008.2026-03-16.persistent-structured-logging
 
 ## Introduction
 
@@ -23,7 +23,7 @@ The user's stated goal: "full traceability... be able to detect when [the API] r
 ## User Stories
 
 ### US-001: LogStore — IDB Persistence Layer
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need a dedicated IDB store for log entries so that logs persist across page reloads and can be exported.
 
 **Acceptance Criteria:**
@@ -36,7 +36,7 @@ The user's stated goal: "full traceability... be able to detect when [the API] r
 - [ ] Typecheck passes (`npm run typecheck`)
 
 ### US-002: Core `log()` Function
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need a `log()` function that writes to both an in-memory array and IDB so that logs are available for real-time display and persistent analysis.
 
 **Acceptance Criteria:**
@@ -51,7 +51,7 @@ The user's stated goal: "full traceability... be able to detect when [the API] r
 - [ ] Typecheck passes
 
 ### US-003: Migrate All `addLog` Callsites to `log()`
-**Status:** pending
+**Status:** done
 **Description:** As a developer, I need to replace every `addLog(msg: string)` call with the structured `log()` function so that all log entries have level, category, and context.
 
 **Acceptance Criteria:**
@@ -67,7 +67,7 @@ The user's stated goal: "full traceability... be able to detect when [the API] r
 - [ ] All tests pass
 
 ### US-004: Capture Console Errors and Uncaught Exceptions
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want all errors (including `console.error`, `console.warn`, and uncaught exceptions) captured in the structured log so that no diagnostic information is lost during overnight runs.
 
 **Acceptance Criteria:**
@@ -80,7 +80,7 @@ The user's stated goal: "full traceability... be able to detect when [the API] r
 - [ ] Typecheck passes
 
 ### US-005: UI — Formatted Textarea and JSONL Export
-**Status:** pending
+**Status:** done
 **Description:** As a user, I want to see structured log entries in the panel's textarea and download the full log history as JSONL so that I can monitor runs in real-time and analyze them offline.
 
 **Acceptance Criteria:**

@@ -79,7 +79,6 @@ describe("v2 -> v3 state migration", () => {
       newPending: 0,
       pendingDelta: 0,
     },
-    logs: ["log1"],
     ...overrides,
   });
 
@@ -189,14 +188,13 @@ describe("v2 -> v3 state migration", () => {
     expect(v3.run.backoffUntil).toBe(0);
   });
 
-  it("preserves non-migrated fields (projects, scan, changes, logs)", async () => {
+  it("preserves non-migrated fields (projects, scan, changes)", async () => {
     const { migrateV2toV3 } = await import("../../src/state/migrate");
     const v2 = makeV2State();
     const v3 = migrateV2toV3(v2 as any);
     expect(v3.projects).toEqual(v2.projects);
     expect(v3.scan).toEqual(v2.scan);
     expect(v3.changes).toEqual(v2.changes);
-    expect(v3.logs).toEqual(v2.logs);
     expect(v3.progress.exported).toEqual(v2.progress.exported);
     expect(v3.progress.pending).toEqual(v2.progress.pending);
     expect(v3.progress.dead).toEqual(v2.progress.dead);

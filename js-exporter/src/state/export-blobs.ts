@@ -1,3 +1,5 @@
+import { log } from "./logger";
+
 const DB_NAME = "cvz-export-blobs";
 const CONV_STORE = "conv";
 const FILES_STORE = "files";
@@ -35,7 +37,9 @@ export const initExportBlobsIdb = async (): Promise<void> => {
   try {
     _db = await openDb();
   } catch (e) {
-    console.warn("convoviz: failed to open export-blobs IDB", e);
+    log("warn", "state", "Failed to open export-blobs IDB", {
+      error: String((e as any)?.message || e),
+    });
   }
 };
 

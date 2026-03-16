@@ -131,5 +131,4 @@ export interface ExportState {
   stats: Stats;
   run: RunState;
   changes: Changes;
-  logs: string[];
 }

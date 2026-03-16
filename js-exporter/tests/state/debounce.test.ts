@@ -16,7 +16,7 @@ describe("createSaveDebounce", () => {
   });
 
   const makeMockState = () =>
-    ({ logs: ["test"] }) as unknown as ExportState;
+    ({ v: 3, ver: "test" }) as unknown as ExportState;
 
   it("immediate=true saves synchronously and clears pending timer", () => {
     const store = makeMockStore();
@@ -90,19 +90,16 @@ describe("createSaveDebounce", () => {
 
   it("saves the current state reference (captures mutations)", () => {
     const store = makeMockStore();
-    const state = { logs: ["initial"] } as unknown as ExportState;
+    const state = { v: 3, ver: "initial" } as unknown as ExportState;
     const save = createSaveDebounce(store, state);
 
     // Mutate state before the debounced save fires
-    state.logs.push("added");
+    (state as any).ver = "mutated";
     save(false);
     vi.advanceTimersByTime(250);
 
     // It should save the mutated state object (same reference)
     expect(store.save).toHaveBeenCalledWith(state);
-    expect((store.save.mock.calls[0][0] as ExportState).logs).toEqual([
-      "initial",
-      "added",
-    ]);
+    expect((store.save.mock.calls[0][0] as ExportState).ver).toBe("mutated");
   });
 });

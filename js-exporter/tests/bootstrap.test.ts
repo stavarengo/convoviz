@@ -60,7 +60,7 @@ describe("bootstrap", () => {
   let mockDiscoveryStore: ReturnType<typeof createMockDiscoveryStore>;
   let mockExportBlobStore: ReturnType<typeof createMockExportBlobStore>;
   let mockTaskList: ReturnType<typeof createMockTaskList>;
-  let addLog: ReturnType<typeof vi.fn>;
+  let log: ReturnType<typeof vi.fn>;
   let saveDebounce: ReturnType<typeof vi.fn>;
   let extractFileRefs: ReturnType<typeof vi.fn>;
 
@@ -114,7 +114,6 @@ describe("bootstrap", () => {
       newPending: 0,
       pendingDelta: 0,
     },
-    logs: [] as string[],
   });
 
   beforeEach(() => {
@@ -123,7 +122,7 @@ describe("bootstrap", () => {
     mockDiscoveryStore = createMockDiscoveryStore();
     mockExportBlobStore = createMockExportBlobStore();
     mockTaskList = createMockTaskList();
-    addLog = vi.fn();
+    log = vi.fn();
     saveDebounce = vi.fn();
     extractFileRefs = vi.fn().mockReturnValue([]);
   });
@@ -135,7 +134,7 @@ describe("bootstrap", () => {
       discoveryStore: mockDiscoveryStore,
       exportBlobStore: mockExportBlobStore,
       taskList: mockTaskList,
-      addLog,
+      log,
       saveDebounce,
       extractFileRefs,
     });

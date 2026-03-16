@@ -86,10 +86,6 @@ describe("EventBus", () => {
 
   describe("listener error isolation", () => {
     it("continues calling remaining listeners when one throws", () => {
-      const consoleError = vi
-        .spyOn(console, "error")
-        .mockImplementation(() => {});
-
       const first = vi.fn();
       const thrower = vi.fn(() => {
         throw new Error("boom");
@@ -105,9 +101,24 @@ describe("EventBus", () => {
       expect(first).toHaveBeenCalledOnce();
       expect(thrower).toHaveBeenCalledOnce();
       expect(third).toHaveBeenCalledOnce();
-      expect(consoleError).toHaveBeenCalledOnce();
+    });
 
-      consoleError.mockRestore();
+    it("calls onError callback with event name and error when a listener throws", () => {
+      const onError = vi.fn();
+      const busWithOnError = createEventBus(onError);
+
+      const thrower = vi.fn(() => {
+        throw new Error("boom");
+      });
+
+      busWithOnError.on("conversation-needs-export", thrower);
+      busWithOnError.emit("conversation-needs-export", { id: "a" });
+
+      expect(onError).toHaveBeenCalledOnce();
+      expect(onError).toHaveBeenCalledWith(
+        "conversation-needs-export",
+        expect.any(Error),
+      );
     });
   });
 

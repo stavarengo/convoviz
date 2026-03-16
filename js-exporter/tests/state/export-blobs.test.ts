@@ -184,6 +184,34 @@ describe("ExportBlobStore", () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
+  it("logs a warning via log() when IDB open fails", async () => {
+    const origOpen = indexedDB.open.bind(indexedDB);
+    indexedDB.open = () => {
+      throw new Error("IDB unavailable");
+    };
+    try {
+      vi.resetModules();
+      const logSpy = vi.fn();
+      vi.doMock("../../src/state/logger", () => ({
+        log: logSpy,
+      }));
+      const { initExportBlobsIdb } = await import(
+        "../../src/state/export-blobs"
+      );
+      await initExportBlobsIdb();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        "warn",
+        "state",
+        expect.stringContaining("Failed to open export-blobs IDB"),
+        expect.objectContaining({ error: expect.any(String) }),
+      );
+    } finally {
+      indexedDB.open = origOpen;
+      vi.resetModules();
+    }
+  });
+
   it("methods are no-ops when initExportBlobsIdb was not called", async () => {
     const { ExportBlobStore } = await import("../../src/state/export-blobs");
     // All methods should not throw when db is not initialized

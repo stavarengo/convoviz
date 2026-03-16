@@ -7,10 +7,10 @@ function makeState(): ExportState {
   return defaultState();
 }
 
-function makeDeps(overrides?: Partial<{ S: ExportState; addLog: (msg: string) => void; setStatus: (msg: string) => void; saveDebounce: (immediate: boolean) => void }>) {
+function makeDeps(overrides?: Partial<{ S: ExportState; log: (...args: unknown[]) => void; setStatus: (msg: string) => void; saveDebounce: (immediate: boolean) => void }>) {
   return {
     S: overrides?.S ?? makeState(),
-    addLog: overrides?.addLog ?? vi.fn(),
+    log: overrides?.log ?? vi.fn(),
     setStatus: overrides?.setStatus ?? vi.fn(),
     saveDebounce: overrides?.saveDebounce ?? vi.fn(),
   };

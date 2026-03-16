@@ -25,7 +25,6 @@ describe("defaultState", () => {
     expect(s.v).toBe(3);
     expect(s.ver).toBe(VER);
     expect(s.projects).toEqual([]);
-    expect(s.logs).toEqual([]);
   });
 
   it("has correct settings defaults", () => {
@@ -244,26 +243,14 @@ describe("mergeState", () => {
     expect(result.projects).toEqual([]);
   });
 
-  it("truncates logs to last 200 entries", () => {
-    const logs = Array.from({ length: 300 }, (_, i) => `log-${i}`);
-    const input: ExportState = {
-      ...defaultState(),
-      logs,
-    };
-    const result = mergeState(input);
-    expect(result.logs).toHaveLength(200);
-    expect(result.logs[0]).toBe("log-100");
-    expect(result.logs[199]).toBe("log-299");
-  });
-
-  it("sets logs to empty array if not an array", () => {
+  it("ignores extra fields (like old logs field) gracefully", () => {
     const input = {
-      v: 3,
-      ver: VER,
-      logs: "not-an-array",
-    } as unknown as ExportState;
+      ...defaultState(),
+      logs: ["old-log-1", "old-log-2"],
+    } as unknown as Partial<ExportState>;
     const result = mergeState(input);
-    expect(result.logs).toEqual([]);
+    // logs field no longer exists on ExportState, but loading old state with it shouldn't crash
+    expect(result.v).toBe(3);
   });
 
   it("merges scan sub-fields", () => {

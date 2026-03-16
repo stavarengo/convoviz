@@ -9,6 +9,8 @@ const makeState = (overrides?: Partial<ExportState>): ExportState => ({
   ...overrides,
 });
 
+const makeLog = () => vi.fn() as ReturnType<typeof vi.fn>;
+
 describe("reconcileExportState", () => {
   it("does nothing when IDB conv keys match S.progress.exported", async () => {
     const S = makeState({
@@ -19,9 +21,9 @@ describe("reconcileExportState", () => {
     });
     const getAllConvKeys = vi.fn().mockResolvedValue(["conv-1", "conv-2"]);
     const saveDebounce = vi.fn();
-    const addLog = vi.fn();
+    const log = makeLog();
 
-    await reconcileExportState({ S, getAllConvKeys, saveDebounce, addLog });
+    await reconcileExportState({ S, getAllConvKeys, saveDebounce, log });
 
     expect(S.progress.exported).toEqual({ "conv-1": 100, "conv-2": 200 });
     expect(saveDebounce).not.toHaveBeenCalled();
@@ -36,9 +38,9 @@ describe("reconcileExportState", () => {
     });
     const getAllConvKeys = vi.fn().mockResolvedValue(["conv-1", "conv-2", "conv-3"]);
     const saveDebounce = vi.fn();
-    const addLog = vi.fn();
+    const log = makeLog();
 
-    await reconcileExportState({ S, getAllConvKeys, saveDebounce, addLog });
+    await reconcileExportState({ S, getAllConvKeys, saveDebounce, log });
 
     expect(S.progress.exported).toEqual({
       "conv-1": 100,
@@ -62,9 +64,9 @@ describe("reconcileExportState", () => {
     });
     const getAllConvKeys = vi.fn().mockResolvedValue(["conv-1", "conv-3"]);
     const saveDebounce = vi.fn();
-    const addLog = vi.fn();
+    const log = makeLog();
 
-    await reconcileExportState({ S, getAllConvKeys, saveDebounce, addLog });
+    await reconcileExportState({ S, getAllConvKeys, saveDebounce, log });
 
     expect(S.progress.exported).toEqual({
       "conv-1": 50,
@@ -75,7 +77,7 @@ describe("reconcileExportState", () => {
     ]);
   });
 
-  it("logs the number of reconciled conversations", async () => {
+  it("logs the number of reconciled conversations with structured log", async () => {
     const S = makeState({
       progress: {
         ...defaultState().progress,
@@ -84,13 +86,16 @@ describe("reconcileExportState", () => {
     });
     const getAllConvKeys = vi.fn().mockResolvedValue(["conv-1", "conv-2"]);
     const saveDebounce = vi.fn();
-    const addLog = vi.fn();
+    const log = makeLog();
 
-    await reconcileExportState({ S, getAllConvKeys, saveDebounce, addLog });
+    await reconcileExportState({ S, getAllConvKeys, saveDebounce, log });
 
-    expect(addLog).toHaveBeenCalled();
-    const msg = addLog.mock.calls.find((c: string[]) => c[0].includes("1"));
-    expect(msg).toBeDefined();
+    expect(log).toHaveBeenCalledWith(
+      "info",
+      "state",
+      expect.stringContaining("Reconciled"),
+      expect.objectContaining({ count: 1 }),
+    );
   });
 
   it("does nothing when IDB is empty", async () => {
@@ -102,9 +107,9 @@ describe("reconcileExportState", () => {
     });
     const getAllConvKeys = vi.fn().mockResolvedValue([]);
     const saveDebounce = vi.fn();
-    const addLog = vi.fn();
+    const log = makeLog();
 
-    await reconcileExportState({ S, getAllConvKeys, saveDebounce, addLog });
+    await reconcileExportState({ S, getAllConvKeys, saveDebounce, log });
 
     expect(S.progress.exported).toEqual({ "conv-1": 100 });
     expect(saveDebounce).not.toHaveBeenCalled();
@@ -114,9 +119,9 @@ describe("reconcileExportState", () => {
     const S = makeState();
     const getAllConvKeys = vi.fn().mockResolvedValue([]);
     const saveDebounce = vi.fn();
-    const addLog = vi.fn();
+    const log = makeLog();
 
-    await reconcileExportState({ S, getAllConvKeys, saveDebounce, addLog });
+    await reconcileExportState({ S, getAllConvKeys, saveDebounce, log });
 
     expect(S.progress.exported).toEqual({});
     expect(saveDebounce).not.toHaveBeenCalled();
@@ -134,9 +139,9 @@ describe("reconcileExportState", () => {
     });
     const getAllConvKeys = vi.fn().mockResolvedValue(["conv-1"]);
     const saveDebounce = vi.fn();
-    const addLog = vi.fn();
+    const log = makeLog();
 
-    await reconcileExportState({ S, getAllConvKeys, saveDebounce, addLog });
+    await reconcileExportState({ S, getAllConvKeys, saveDebounce, log });
 
     expect(S.progress.exported).toEqual({ "conv-1": 12345 });
     expect(S.progress.pending).toEqual([]);

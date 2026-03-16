@@ -1,4 +1,5 @@
 import type { ExportState } from "../types";
+import type { LogLevel } from "../state/logger";
 import type { UI } from "../ui/panel";
 import type { BootstrapResult } from "../bootstrap";
 import { now, fmtMs } from "../utils/format";
@@ -13,7 +14,7 @@ interface CoordinatorNet {
 export interface CoordinatorDeps extends BootstrapResult {
   S: ExportState;
   ui: UI & { ensureTick?: () => void };
-  addLog: (msg: string) => void;
+  log: (level: LogLevel, category: string, message: string, context?: Record<string, unknown>) => void;
   saveDebounce: (immediate: boolean) => void;
   assertOnChatGPT: () => void;
   net: CoordinatorNet;
@@ -45,7 +46,7 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
     projectScanner,
     setScanAbortSignal,
     getSpawnedScannerPromises,
-    addLog,
+    log,
     saveDebounce,
     assertOnChatGPT,
     net,
@@ -64,7 +65,7 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
 
     async rescan(force: boolean): Promise<void> {
       if (S.run.isRunning && !force) {
-        addLog("Can't rescan while running. Stop first.");
+        log("warn", "sys", "Can't rescan while running. Stop first.");
         return;
       }
       if (coordinator.scanPromise) return coordinator.scanPromise as Promise<void>;
@@ -77,7 +78,7 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
       coordinator.scanPromise = (async () => {
         try {
           assertOnChatGPT();
-          addLog("Rescan started\u2026");
+          log("info", "scan", "Rescan started");
           ui.setStatus("Scanning\u2026");
 
           const convPromise = conversationScanner.start(ac.signal);
@@ -93,18 +94,17 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
 
           if (!ac.signal.aborted) {
             ui.setStatus("Rescan done.");
-            addLog("Rescan done.");
+            log("info", "scan", "Rescan done");
           }
         } catch (e: any) {
           if (e && e.name === "AbortError") {
             ui.setStatus("Scan stopped.");
-            addLog("Scan stopped.");
+            log("info", "scan", "Scan stopped");
           } else {
             S.run.lastError = String((e && e.message) || e);
             saveDebounce(true);
             ui.setStatus("Rescan error: " + ((e && e.message) || e));
-            addLog("Rescan error: " + ((e && e.message) || e));
-            console.error(e);
+            log("error", "scan", "Rescan error", { error: String((e && e.message) || e) });
           }
         } finally {
           coordinator._scanAbort = null;
@@ -118,7 +118,7 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
 
     async start(): Promise<void> {
       if (S.run.isRunning) {
-        addLog("Already running.");
+        log("warn", "sys", "Already running.");
         return;
       }
       try {
@@ -131,20 +131,20 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
         S.run.startedAt = now();
         saveDebounce(true);
         ui.renderAll();
-        addLog("Start.");
+        log("info", "sys", "Start");
         ui.setStatus("Preparing\u2026");
         await net.getToken(ac.signal);
 
         if (S.run.backoffUntil && S.run.backoffUntil > now()) {
           const wait = S.run.backoffUntil - now();
           ui.setStatus("Backoff carryover \u2192 sleeping " + fmtMs(wait));
-          addLog("Backoff carryover: sleeping " + fmtMs(wait) + "\u2026");
+          log("info", "net", "Backoff carryover", { sleepMs: wait });
           await sleep(wait, ac.signal);
         }
 
         if (coordinator.stopRequested || ac.signal.aborted) {
           ui.setStatus("Paused.");
-          addLog("Stopped.");
+          log("info", "sys", "Stopped");
           return;
         }
 
@@ -213,10 +213,10 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
 
         // Start scanners
         const convScanPromise = conversationScanner.start(scanAc.signal).catch((e: any) => {
-          if (e && e.name !== "AbortError") console.error(e);
+          if (e && e.name !== "AbortError") log("error", "scan", "Conversation scanner error", { error: String(e && e.message || e) });
         });
         const projScanPromise = projectScanner.start(scanAc.signal).catch((e: any) => {
-          if (e && e.name !== "AbortError") console.error(e);
+          if (e && e.name !== "AbortError") log("error", "scan", "Project scanner error", { error: String(e && e.message || e) });
         });
 
         // Start all queues
@@ -283,13 +283,13 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
 
         if (coordinator.stopRequested) {
           ui.setStatus("Paused.");
-          addLog("Stopped.");
+          log("info", "sys", "Stopped");
         } else if (anyPending) {
           ui.setStatus("Paused.");
-          addLog("Paused. Some items pending.");
+          log("info", "sys", "Paused. Some items pending.");
         } else {
           ui.setStatus("\u2705 All done.");
-          addLog("All done.");
+          log("info", "sys", "All done.");
           if (deps.onExportComplete) {
             await deps.onExportComplete();
           }
@@ -297,12 +297,11 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
       } catch (e: any) {
         if (e && e.name === "AbortError") {
           ui.setStatus("Paused.");
-          addLog("Stopped.");
+          log("info", "sys", "Stopped");
         } else {
           S.run.lastError = String((e && e.message) || e);
           ui.setStatus("\u274C Error: " + ((e && e.message) || e));
-          addLog("Error: " + ((e && e.message) || e));
-          console.error(e);
+          log("error", "sys", "Error", { error: String((e && e.message) || e) });
         }
       } finally {
         S.run.isRunning = false;
@@ -320,13 +319,13 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
         !coordinator._scanAbort &&
         !S.run.isRunning
       ) {
-        addLog("Not running.");
+        log("info", "sys", "Not running.");
         return;
       }
       coordinator.stopRequested = true;
       S.run.isRunning = false;
       saveDebounce(true);
-      addLog("Stop requested\u2026");
+      log("info", "sys", "Stop requested");
       ui.setStatus("Stopping\u2026");
       chatQueue.stop();
       attachmentQueue.stop();

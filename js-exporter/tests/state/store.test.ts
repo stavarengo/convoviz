@@ -33,20 +33,18 @@ describe("Store with IndexedDB", () => {
         pause: 500,
         filterGizmoId: "g1" as string | null,
       },
-      logs: ["log1", "log2"],
     };
     await Store.save(state);
     const loaded = await Store.load();
     expect(loaded.settings.chatConcurrency).toBe(5);
     expect(loaded.settings.fileConcurrency).toBe(4);
-    expect(loaded.logs).toEqual(["log1", "log2"]);
   });
 
   it("reset clears saved state", async () => {
     const { initIdb, Store } = await import("../../src/state/store");
     const { defaultState } = await import("../../src/state/defaults");
     await initIdb();
-    const state = { ...defaultState(), logs: ["saved-log"] };
+    const state = { ...defaultState() };
     await Store.save(state);
     await Store.reset();
     const loaded = await Store.load();
@@ -77,12 +75,12 @@ describe("Store with IndexedDB", () => {
     const { initIdb, Store } = await import("../../src/state/store");
     const { defaultState } = await import("../../src/state/defaults");
     await initIdb();
-    const state1 = { ...defaultState(), logs: ["first"] };
+    const state1 = { ...defaultState(), ver: "first" };
     await Store.save(state1);
-    const state2 = { ...defaultState(), logs: ["second"] };
+    const state2 = { ...defaultState(), ver: "second" };
     await Store.save(state2);
     const loaded = await Store.load();
-    expect(loaded.logs).toEqual(["second"]);
+    expect(loaded.ver).toBe("second");
   });
 
   it("load returns default state when initIdb was not called", async () => {
@@ -119,6 +117,32 @@ describe("Store with localStorage fallback", () => {
     localStorage.clear();
   });
 
+  it("logs a warning via log() when IndexedDB is unavailable", async () => {
+    const origOpen = indexedDB.open.bind(indexedDB);
+    indexedDB.open = () => {
+      throw new Error("IndexedDB unavailable");
+    };
+    try {
+      vi.resetModules();
+      const logSpy = vi.fn();
+      vi.doMock("../../src/state/logger", () => ({
+        log: logSpy,
+      }));
+      const { initIdb } = await import("../../src/state/store");
+      await initIdb();
+
+      expect(logSpy).toHaveBeenCalledWith(
+        "warn",
+        "state",
+        expect.stringContaining("IndexedDB unavailable"),
+        expect.objectContaining({ error: expect.any(String) }),
+      );
+    } finally {
+      indexedDB.open = origOpen;
+      vi.resetModules();
+    }
+  });
+
   it("falls back to localStorage when IndexedDB is unavailable", async () => {
     const origOpen = indexedDB.open.bind(indexedDB);
     indexedDB.open = () => {
@@ -129,16 +153,16 @@ describe("Store with localStorage fallback", () => {
       const { defaultState, KEY } = await import("../../src/state/defaults");
       await initIdb();
 
-      const state = { ...defaultState(), logs: ["ls-test"] };
+      const state = { ...defaultState(), ver: "ls-test" };
       await Store.save(state);
 
       const raw = localStorage.getItem(KEY);
       expect(raw).toBeTruthy();
       const parsed = JSON.parse(raw!);
-      expect(parsed.logs).toEqual(["ls-test"]);
+      expect(parsed.ver).toBe("ls-test");
 
       const loaded = await Store.load();
-      expect(loaded.logs).toEqual(["ls-test"]);
+      expect(loaded.ver).toBe("ls-test");
 
       await Store.reset();
       expect(localStorage.getItem(KEY)).toBeNull();

@@ -59,7 +59,6 @@ export const defaultState = (): ExportState => ({
     newPending: 0,
     pendingDelta: 0,
   },
-  logs: [],
 });
 
 export const mergeState = (
@@ -137,6 +136,5 @@ export const mergeState = (
     ...d.changes,
     ...(s.changes || {}),
   };
-  out.logs = Array.isArray(s.logs) ? s.logs.slice(-200) : [];
   return out;
 };

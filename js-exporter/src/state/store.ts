@@ -1,6 +1,7 @@
 import type { ExportState } from "../types";
 import { safeJsonParse } from "../utils/format";
 import { KEY, defaultState, mergeState } from "./defaults";
+import { log } from "./logger";
 
 export { migrateV2toV3 } from "./migrate";
 
@@ -55,10 +56,9 @@ export const initIdb = async (): Promise<void> => {
   try {
     _idb = await openIdb();
   } catch (e) {
-    console.warn(
-      "convoviz: IndexedDB unavailable, falling back to localStorage",
-      e,
-    );
+    log("warn", "state", "IndexedDB unavailable, falling back to localStorage", {
+      error: String((e as any)?.message || e),
+    });
     _useLocalStorage = true;
   }
 };
@@ -76,7 +76,9 @@ export const Store = {
       const s = await idbGet(_idb);
       return mergeState(s);
     } catch (e) {
-      console.warn("convoviz: failed to load from IndexedDB", e);
+      log("warn", "state", "Failed to load from IndexedDB", {
+        error: String((e as any)?.message || e),
+      });
       return defaultState();
     }
   },
@@ -86,7 +88,9 @@ export const Store = {
       try {
         localStorage.setItem(KEY, JSON.stringify(st));
       } catch (e) {
-        console.warn("convoviz: failed to save state to localStorage", e);
+        log("warn", "state", "Failed to save state to localStorage", {
+          error: String((e as any)?.message || e),
+        });
       }
       return;
     }
@@ -94,7 +98,9 @@ export const Store = {
     try {
       await idbPut(_idb, st);
     } catch (e) {
-      console.warn("convoviz: failed to save state to IndexedDB", e);
+      log("warn", "state", "Failed to save state to IndexedDB", {
+        error: String((e as any)?.message || e),
+      });
     }
   },
 
@@ -107,7 +113,9 @@ export const Store = {
     try {
       await idbDelete(_idb);
     } catch (e) {
-      console.warn("convoviz: failed to reset IndexedDB state", e);
+      log("warn", "state", "Failed to reset IndexedDB state", {
+        error: String((e as any)?.message || e),
+      });
     }
   },
 

@@ -64,7 +64,6 @@ describe("types", () => {
         backoffCount: 0,
       },
       changes: { at: 0, newChats: 0, removedChats: 0, updatedChats: 0, newPending: 0, pendingDelta: 0 },
-      logs: [],
     };
     expect(state.v).toBe(3);
     expect(state.ver).toBe("cvz-bookmarklet-5.0");

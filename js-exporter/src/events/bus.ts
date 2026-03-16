@@ -9,7 +9,9 @@ export interface EventBus {
   clear(): void;
 }
 
-export function createEventBus(): EventBus {
+export function createEventBus(
+  onError?: (event: keyof EventMap, err: unknown) => void,
+): EventBus {
   const listeners = new Map<keyof EventMap, Array<Listener<never>>>();
 
   function getListeners<K extends keyof EventMap>(
@@ -39,10 +41,7 @@ export function createEventBus(): EventBus {
         try {
           (fn as Listener<K>)(payload);
         } catch (err) {
-          console.error(
-            `EventBus: listener for "${String(event)}" threw:`,
-            err,
-          );
+          if (onError) onError(event, err);
         }
       }
     },

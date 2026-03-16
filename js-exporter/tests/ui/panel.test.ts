@@ -9,7 +9,7 @@ import type { TaskList } from "../../src/ui/task-list";
 
 const makeDeps = (stateOverrides?: Partial<ExportState>) => {
   const S: ExportState = { ...defaultState(), ...stateOverrides };
-  const addLog = vi.fn();
+  const log = vi.fn();
   const net: Net = {
     token: "",
     _tokenPromise: null,
@@ -30,7 +30,10 @@ const makeDeps = (stateOverrides?: Partial<ExportState>) => {
   const scanProjects = vi.fn().mockResolvedValue([]);
   const getAccumulatedSize = vi.fn().mockResolvedValue(0);
   const onDownload = vi.fn().mockResolvedValue(undefined);
-  return { S, addLog, net, taskList, saveDebounce, scanProjects, getAccumulatedSize, onDownload };
+  const getSessionLogs = vi.fn().mockReturnValue([]);
+  const getLogCount = vi.fn().mockResolvedValue(0);
+  const onDownloadLogs = vi.fn().mockResolvedValue(undefined);
+  return { S, log, net, taskList, saveDebounce, scanProjects, getAccumulatedSize, onDownload, getSessionLogs, getLogCount, onDownloadLogs };
 };
 
 describe("createUI", () => {
@@ -157,27 +160,80 @@ describe("createUI", () => {
   });
 
   describe("renderLogs()", () => {
-    it("populates #cvz-log from S.logs array", () => {
+    it("does not crash when called on injected panel", () => {
       const deps = makeDeps();
-      deps.S.logs = ["line 1", "line 2", "line 3"];
       const ui = createUI(deps);
       ui.inject();
       ui.renderLogs();
       const el = document.getElementById("cvz-log") as HTMLTextAreaElement;
-      expect(el.value).toBe("line 1\nline 2\nline 3");
+      expect(el).not.toBeNull();
     });
 
-    it("limits to last 200 logs", () => {
+    it("renders info/warn/error entries with [HH:MM:SS] [LEVEL/category] format", () => {
       const deps = makeDeps();
-      deps.S.logs = Array.from({ length: 250 }, (_, i) => "log " + i);
+      const ts = new Date(2025, 5, 15, 14, 32, 1).getTime(); // 14:32:01
+      deps.getSessionLogs = vi.fn().mockReturnValue([
+        { timestamp: ts, session: "abcd1234", level: "info", category: "sys", message: "Start" },
+        { timestamp: ts + 1000, session: "abcd1234", level: "warn", category: "net", message: "Rate limited (429), retry in 30s" },
+        { timestamp: ts + 2000, session: "abcd1234", level: "error", category: "sys", message: "Something failed" },
+      ]);
       const ui = createUI(deps);
       ui.inject();
       ui.renderLogs();
       const el = document.getElementById("cvz-log") as HTMLTextAreaElement;
       const lines = el.value.split("\n");
-      expect(lines.length).toBe(200);
-      expect(lines[0]).toBe("log 50");
-      expect(lines[199]).toBe("log 249");
+      expect(lines).toHaveLength(3);
+      expect(lines[0]).toBe("[14:32:01] [INFO/sys] Start");
+      expect(lines[1]).toBe("[14:32:02] [WARN/net] Rate limited (429), retry in 30s");
+      expect(lines[2]).toBe("[14:32:03] [ERROR/sys] Something failed");
+    });
+
+    it("excludes debug entries from the textarea", () => {
+      const deps = makeDeps();
+      const ts = Date.now();
+      deps.getSessionLogs = vi.fn().mockReturnValue([
+        { timestamp: ts, session: "abcd1234", level: "debug", category: "sys", message: "Debug only" },
+        { timestamp: ts, session: "abcd1234", level: "info", category: "sys", message: "Visible" },
+        { timestamp: ts, session: "abcd1234", level: "debug", category: "net", message: "Another debug" },
+      ]);
+      const ui = createUI(deps);
+      ui.inject();
+      ui.renderLogs();
+      const el = document.getElementById("cvz-log") as HTMLTextAreaElement;
+      expect(el.value).not.toContain("Debug only");
+      expect(el.value).not.toContain("Another debug");
+      expect(el.value).toContain("Visible");
+    });
+
+    it("does not include context object in the textarea", () => {
+      const deps = makeDeps();
+      const ts = Date.now();
+      deps.getSessionLogs = vi.fn().mockReturnValue([
+        { timestamp: ts, session: "abcd1234", level: "info", category: "net", message: "Fetched", context: { url: "https://example.com", status: 200 } },
+      ]);
+      const ui = createUI(deps);
+      ui.inject();
+      ui.renderLogs();
+      const el = document.getElementById("cvz-log") as HTMLTextAreaElement;
+      expect(el.value).not.toContain("example.com");
+      expect(el.value).not.toContain("200");
+      expect(el.value).toContain("Fetched");
+    });
+
+    it("auto-scrolls textarea to bottom", () => {
+      const deps = makeDeps();
+      const ts = Date.now();
+      const entries = [];
+      for (let i = 0; i < 50; i++) {
+        entries.push({ timestamp: ts + i * 1000, session: "abcd1234", level: "info" as const, category: "sys", message: `Line ${i}` });
+      }
+      deps.getSessionLogs = vi.fn().mockReturnValue(entries);
+      const ui = createUI(deps);
+      ui.inject();
+      ui.renderLogs();
+      const el = document.getElementById("cvz-log") as HTMLTextAreaElement;
+      // scrollTop should be set to scrollHeight after rendering
+      expect(el.scrollTop).toBe(el.scrollHeight);
     });
   });
 
@@ -438,6 +494,38 @@ describe("createUI", () => {
       await ui.updateDownloadButton();
       const btn = document.getElementById("cvz-download") as HTMLButtonElement;
       expect(btn.disabled).toBe(false);
+    });
+  });
+
+  describe("download logs button", () => {
+    it("is present in the panel with id cvz-dllogs", () => {
+      const deps = makeDeps();
+      const ui = createUI(deps);
+      ui.inject();
+      const btn = document.getElementById("cvz-dllogs");
+      expect(btn).not.toBeNull();
+    });
+
+    it("shows entry count in the label", async () => {
+      const deps = makeDeps();
+      deps.getLogCount.mockResolvedValue(1234);
+      const ui = createUI(deps);
+      ui.inject();
+      ui.renderAll();
+      await vi.waitFor(() => {
+        const btn = document.getElementById("cvz-dllogs")!;
+        expect(btn.textContent).toContain("Logs");
+        expect(btn.textContent).toContain("1,234");
+      });
+    });
+
+    it("calls onDownloadLogs when clicked", () => {
+      const deps = makeDeps();
+      const ui = createUI(deps);
+      ui.inject();
+      const btn = document.getElementById("cvz-dllogs")!;
+      btn.click();
+      expect(deps.onDownloadLogs).toHaveBeenCalled();
     });
   });
 

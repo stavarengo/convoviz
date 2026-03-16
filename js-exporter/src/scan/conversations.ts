@@ -1,4 +1,5 @@
 import type { ExportState, PendingItem } from "../types";
+import type { LogLevel } from "../state/logger";
 
 
 interface ScanNet {
@@ -12,7 +13,7 @@ export const scanConversations = async (
   signal: AbortSignal,
   onPage: ((items: PendingItem[]) => void) | null,
   knownIds: Set<string> | null,
-  addLog: (msg: string) => void,
+  log: (level: LogLevel, category: string, message: string, context?: Record<string, unknown>) => void,
   setStatus: (msg: string) => void,
 ): Promise<PendingItem[]> => {
   await net.getToken(signal);
@@ -55,12 +56,11 @@ export const scanConversations = async (
             consecutiveKnownPages +
             " pages of known chats, stopping early.",
         );
-        addLog(
-          "Scan early-exit at offset " +
-            offset +
-            " (" +
-            consecutiveKnownPages +
-            " consecutive known pages).",
+        log(
+          "info",
+          "scan",
+          "Scan early-exit at offset " + offset,
+          { offset, consecutiveKnownPages },
         );
         break;
       }

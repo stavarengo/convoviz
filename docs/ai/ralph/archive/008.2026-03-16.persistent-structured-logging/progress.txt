@@ -1,0 +1,145 @@
+# PRD: Persistent Structured Logging for JS Exporter
+
+Base commit: 2f13fe966bb53ddfe407527041892123b2b0e8d1
+
+## Codebase Patterns
+
+Squash from: 2f13fe966bb53ddfe407527041892123b2b0e8d1
+
+- IDB stores use factory functions (e.g., `createLogStore()`, `createDiscoveryStore()`) that return an object with `init()` and operation methods. The `init()` opens the database; all operations are no-ops if `init()` hasn't been called or failed.
+- `fake-indexeddb/auto` shares IDB state across tests in the same file. Each `beforeEach` must clear the database via `init()` + `clear()` + `vi.resetModules()` to isolate tests.
+- Tests use dynamic imports (`await import(...)`) combined with `vi.resetModules()` to get fresh module state per test.
+- Quality gate: `npm run typecheck` (tsc --noEmit) + `npm test` (vitest run) must both pass.
+- The logger module (`logger.ts`) uses module-level state for session ID and in-memory log array. Use `vi.resetModules()` + dynamic imports in tests to get fresh state per test. `initLogger()` must be called to enable IDB persistence; without it, `log()` still works in-memory only.
+- All dependency interfaces use `log: (level: LogLevel, category: string, message: string, context?: Record<string, unknown>) => void` — import `LogLevel` from `state/logger`. Mock with `vi.fn()` in tests.
+- `ExportState` no longer has a `logs` field. Logs are decoupled from export state entirely. The `renderLogs()` method in panel.ts is a stub pending US-005 wiring.
+- Categories: `sys`, `scan`, `chat`, `file`, `kf`, `net`, `ui`, `state` — follow these consistently.
+- Zero `console.error`/`console.warn` calls in source. Low-level modules (`store.ts`, `export-blobs.ts`) import `log` directly from `logger.ts`. `bus.ts` takes an optional `onError` callback to stay decoupled.
+- `vi.doMock()` must be called AFTER `vi.resetModules()` — if called before, the mock registration is cleared by resetModules.
+
+## 2026-03-16 - US-001
+
+- Implemented `LogStore` IDB persistence layer in `js-exporter/src/state/log-store.ts`
+- Created `LogEntry` interface, `LogLevel` type, and `LogStore` interface
+- Dedicated IDB database `cvz-log` with object store `entries` (keyPath: `id`, autoIncrement: true) and `session` index
+- Operations: `put`, `getAll`, `count`, `clear`, `runRetention`
+- Graceful degradation: `available` flag, all ops become no-ops when IDB unavailable
+- 16 unit tests in `js-exporter/tests/state/log-store.test.ts`
+- Files changed:
+  - `js-exporter/src/state/log-store.ts` (new)
+  - `js-exporter/tests/state/log-store.test.ts` (new)
+- **Learnings for future iterations:**
+  - `fake-indexeddb/auto` persists IDB state across tests; must clear + resetModules in beforeEach
+  - The `runRetention` method takes configurable thresholds (highMark/lowMark) to make testing feasible without inserting 100k entries
+
+---
+
+## 2026-03-16 - US-002
+
+- Implemented core `log()` function in `js-exporter/src/state/logger.ts`
+- Exports: `initLogger()`, `log()`, `getSessionLogs()`, `getLogCount()`, `LogLevel`, `LogEntry`
+- `log()` is synchronous: pushes to in-memory array immediately, fire-and-forget IDB write
+- Session ID: 8-char random hex generated once at module load time via `crypto.getRandomValues`
+- In-memory array has no cap (holds current session only)
+- Retention cleanup runs in `initLogger()` with 100k/80k thresholds
+- 13 unit tests in `js-exporter/tests/state/logger.test.ts`
+- Files changed:
+  - `js-exporter/src/state/logger.ts` (new)
+  - `js-exporter/tests/state/logger.test.ts` (new)
+- **Learnings for future iterations:**
+  - When testing IDB write from `log()`, use `await new Promise(r => setTimeout(r, 50))` to let the fire-and-forget promise settle before reading IDB
+  - The logger re-exports `LogLevel` and `LogEntry` from `log-store.ts` — consumers should import from `logger.ts` rather than `log-store.ts` directly
+
+---
+
+## 2026-03-16 - US-003
+
+- Migrated all `addLog(msg: string)` callsites to structured `log(level, category, message, context?)` across the entire codebase
+- Updated 6 dependency interfaces: `UIDeps`, `BootstrapDeps`, `CoordinatorDeps`, `NetDeps`, `ConversationScannerDeps` (parameter), `ReconcileDeps`
+- Removed `createAddLog` factory function from `main.ts`
+- Removed `logs: string[]` from `ExportState` interface, `defaultState()`, and `mergeState()`
+- Removed `logs` field from `migrateV2toV3` migration
+- Wired `log()` from `state/logger` in `main.ts` IIFE bootstrap, passed through dependency tree
+- Updated `renderLogs()` in panel.ts to no longer read from `S.logs` (stub for US-005)
+- Updated all tests: reconcile, conversations, net, bootstrap, coordinator, panel, main, defaults, debounce, store, migration-v3, types
+- Files changed:
+  - `js-exporter/src/main.ts` (removed createAddLog, wired log())
+  - `js-exporter/src/types.ts` (removed logs field from ExportState)
+  - `js-exporter/src/state/defaults.ts` (removed logs from defaultState and mergeState)
+  - `js-exporter/src/state/migrate.ts` (removed logs from v2->v3 migration)
+  - `js-exporter/src/state/reconcile.ts` (addLog -> log)
+  - `js-exporter/src/net/net.ts` (addLog -> log with structured context)
+  - `js-exporter/src/scan/conversations.ts` (addLog -> log)
+  - `js-exporter/src/bootstrap.ts` (addLog -> log, console.error -> log)
+  - `js-exporter/src/export/coordinator.ts` (addLog -> log, console.error -> log)
+  - `js-exporter/src/ui/panel.ts` (addLog -> log, renderLogs stub)
+  - `js-exporter/tests/main.test.ts` (removed createAddLog tests)
+  - `js-exporter/tests/ui/panel.test.ts` (addLog -> log, updated renderLogs test)
+  - `js-exporter/tests/bootstrap.test.ts` (addLog -> log)
+  - `js-exporter/tests/export/coordinator.test.ts` (addLog -> log)
+  - `js-exporter/tests/state/reconcile.test.ts` (addLog -> log)
+  - `js-exporter/tests/scan/conversations.test.ts` (addLog -> log)
+  - `js-exporter/tests/net/net.test.ts` (addLog -> log)
+  - `js-exporter/tests/state/defaults.test.ts` (removed logs tests, added graceful-ignore test)
+  - `js-exporter/tests/state/store.test.ts` (removed logs references)
+  - `js-exporter/tests/state/debounce.test.ts` (removed logs references)
+  - `js-exporter/tests/state/migration-v3.test.ts` (removed logs from v2 fixture and assertion)
+  - `js-exporter/tests/types.test.ts` (removed logs from ExportState fixture)
+- **Learnings for future iterations:**
+  - When migrating `addLog -> log`, the coordinator and bootstrap files had `console.error(e)` calls right after `addLog(...)` calls. These were redundant with the new structured `log("error", ...)` and could be removed in the same pass. The remaining `console.error/warn` calls in store.ts, export-blobs.ts, bus.ts are standalone and belong in US-004.
+  - `renderLogs()` in panel.ts is now a stub — US-005 must wire it to read from `getSessionLogs()` and format entries as `[HH:MM:SS] [LEVEL/category] message`.
+
+---
+
+## 2026-03-16 - US-004
+
+- Replaced all console.error/console.warn calls in the codebase with structured log() calls
+- bus.ts: replaced console.error with optional onError callback; wired in bootstrap.ts to call log()
+- store.ts: replaced 5 console.warn calls with log("warn", "state", ...) — imports log from logger.ts directly
+- export-blobs.ts: replaced console.warn with log("warn", "state", ...) — imports log from logger.ts directly
+- Created global-error-handlers.ts: registerGlobalErrorHandlers(log) registers window "error" and "unhandledrejection" handlers
+- Added getSessionId() export to logger.ts
+- Registered global error handlers in main.ts before any async work
+- Added startup log entry in main.ts: log("info", "sys", "Session started", { version, sessionId, storageBackend, userAgent })
+- Files changed:
+  - `js-exporter/src/state/global-error-handlers.ts` (new)
+  - `js-exporter/src/state/logger.ts` (added getSessionId export)
+  - `js-exporter/src/state/store.ts` (console.warn -> log)
+  - `js-exporter/src/state/export-blobs.ts` (console.warn -> log)
+  - `js-exporter/src/events/bus.ts` (console.error -> onError callback)
+  - `js-exporter/src/bootstrap.ts` (wired onError callback into createEventBus)
+  - `js-exporter/src/main.ts` (registerGlobalErrorHandlers, startup log, getSessionId, isUsingLocalStorage)
+  - `js-exporter/tests/state/global-error-handlers.test.ts` (new, 4 tests)
+  - `js-exporter/tests/state/logger.test.ts` (added getSessionId test)
+  - `js-exporter/tests/state/store.test.ts` (added log warning test)
+  - `js-exporter/tests/state/export-blobs.test.ts` (added log warning test)
+  - `js-exporter/tests/events/bus.test.ts` (updated error isolation test, added onError test)
+- **Learnings for future iterations:**
+  - `vi.doMock()` must be called AFTER `vi.resetModules()`, not before. If called before, `vi.resetModules()` clears the mock registration and the subsequent dynamic import won't see the mock.
+  - Low-level modules like store.ts and export-blobs.ts can safely import `log` from `logger.ts` directly — no circular dependency because the dependency chain is `store -> logger -> log-store` with no back-edge.
+
+---
+
+## 2026-03-16 - US-005
+
+- Wired textarea to render from in-memory session logs via `getSessionLogs()` dep
+- Format: `[HH:MM:SS] [LEVEL/category] message` — debug entries excluded, context not shown
+- Auto-scroll preserved (scrollTop = scrollHeight)
+- Added "Download Logs" button (`#cvz-dllogs`) with entry count label `Logs (N)` updated from `getLogCount()` on each `renderAll()`
+- JSONL export: `onDownloadLogs` callback reads all IDB entries via `getAllLogs()`, serializes with `serializeLogsJsonl()`, downloads as `cvz-logs-YYYY-MM-DD-HHmmss.jsonl`
+- Added `formatLogLine()`, `serializeLogsJsonl()`, `getAllLogs()`, `clearLogs()` exports to `logger.ts`
+- Exposed `__cvz_clearLogs()` on window in `main.ts`
+- Reset button does NOT clear logs (logs are diagnostic data)
+- Panel deps extended with optional `getSessionLogs`, `getLogCount`, `onDownloadLogs`
+- Files changed:
+  - `js-exporter/src/state/logger.ts` (added formatLogLine, serializeLogsJsonl, getAllLogs, clearLogs)
+  - `js-exporter/src/ui/panel.ts` (renderLogs wired, Download Logs button, log count update)
+  - `js-exporter/src/main.ts` (wired getSessionLogs, getLogCount, onDownloadLogs, __cvz_clearLogs)
+  - `js-exporter/tests/state/logger.test.ts` (added 6 tests: formatLogLine, getAllLogs, serializeLogsJsonl, clearLogs)
+  - `js-exporter/tests/ui/panel.test.ts` (added 7 tests: textarea format, debug exclusion, context exclusion, auto-scroll, download logs button)
+- **Learnings for future iterations:**
+  - Panel deps are optional (e.g., `getSessionLogs?`, `getLogCount?`) to maintain backward compatibility with test mocks that don't provide them. The `renderLogs()` method gracefully handles missing `getSessionLogs` by just doing the scroll.
+  - The JSONL export filename uses `net.download()` (same as the export state download), which creates a temporary anchor element. In tests, `net.download` is a mock.
+
+---
+Final commit: d98fc80ea23569b257d9ae5b4b75d034e5d883ba
