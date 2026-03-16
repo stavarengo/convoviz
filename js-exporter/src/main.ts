@@ -1,7 +1,7 @@
 import type { ExportState } from "./types";
 import { initIdb, Store } from "./state/store";
 import { initExportBlobsIdb, ExportBlobStore } from "./state/export-blobs";
-import { VER } from "./state/defaults";
+import { KEY, VER } from "./state/defaults";
 import { createSaveDebounce } from "./state/debounce";
 import { createNet } from "./net/net";
 import { createTaskList } from "./ui/task-list";
@@ -52,6 +52,9 @@ export const createAddLog = (
     // addLog needs renderLogs from UI, but UI needs addLog.
     // Resolve the circular dependency: addLog calls renderLogs via a late-bound reference.
     let _renderLogs = (): void => {};
+
+    // Late-bound reference for discovery store (created after UI)
+    let _discoveryStore: { destroy(): Promise<void> } | null = null;
     const addLog = createAddLog(S, saveDebounce, () => _renderLogs());
 
     const net = createNet({
@@ -77,11 +80,11 @@ export const createAddLog = (
       getAccumulatedSize: () => ExportBlobStore.totalSize(),
       onDownload: triggerDownload,
       onReset: async () => {
-        await Store.reset();
-        await ExportBlobStore.clear();
-        S = await Store.load();
-        addLog("State reset.");
-        ui.renderAll();
+        await Store.destroy();
+        await ExportBlobStore.destroy();
+        if (_discoveryStore) await _discoveryStore.destroy();
+        localStorage.removeItem(KEY);
+        location.reload();
       },
     });
 
@@ -100,6 +103,7 @@ export const createAddLog = (
     const discoveryStore = createDiscoveryStore();
     await discoveryStore.init();
     await discoveryStore.seedFromExportState(S.progress.exported || {});
+    _discoveryStore = discoveryStore;
 
     // Bootstrap event-driven components
     const components = bootstrap({
@@ -142,12 +146,11 @@ export const createAddLog = (
     (window as any).__cvz_state = S;
     (window as any).__cvz_stop = () => coordinator.stop();
     (window as any).__cvz_reset = async () => {
-      await Store.reset();
-      await ExportBlobStore.clear();
-      await discoveryStore.clear();
-      S = await Store.load();
-      addLog("State reset via __cvz_reset.");
-      ui.renderAll();
+      await Store.destroy();
+      await ExportBlobStore.destroy();
+      await discoveryStore.destroy();
+      localStorage.removeItem(KEY);
+      location.reload();
     };
 
     // Handle interrupted-run recovery

@@ -110,4 +110,20 @@ export const Store = {
       console.warn("convoviz: failed to reset IndexedDB state", e);
     }
   },
+
+  async destroy(): Promise<void> {
+    if (_useLocalStorage) {
+      localStorage.removeItem(KEY);
+      return;
+    }
+    if (!_idb) return;
+    _idb.close();
+    _idb = null;
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.deleteDatabase(IDB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => resolve();
+    });
+  },
 };

@@ -201,4 +201,16 @@ export const ExportBlobStore = {
     await idbClear(FILES_STORE);
     await idbClear(FILE_META_STORE);
   },
+
+  async destroy(): Promise<void> {
+    if (!_db) return;
+    _db.close();
+    _db = null;
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => resolve();
+    });
+  },
 };

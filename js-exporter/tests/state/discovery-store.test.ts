@@ -300,6 +300,34 @@ describe("DiscoveryStore", () => {
     });
   });
 
+  // --- Destroy ---
+
+  describe("destroy", () => {
+    it("closes connection and calls deleteDatabase", async () => {
+      const store = await createStore();
+      await store.putConversation({
+        id: "c1",
+        title: "C1",
+        updateTime: 1,
+        gizmoId: null,
+        status: "new",
+        exportedAt: null,
+      });
+      const deleteSpy = vi.spyOn(indexedDB, "deleteDatabase").mockImplementation(
+        () => {
+          const req = {} as IDBOpenDBRequest;
+          setTimeout(() => req.onsuccess?.({} as Event), 0);
+          return req;
+        },
+      );
+      await store.destroy();
+      expect(deleteSpy).toHaveBeenCalledWith("cvz-discovery");
+      // After destroy, methods are no-ops (db is null)
+      expect(await store.getAllConversations()).toEqual([]);
+      deleteSpy.mockRestore();
+    });
+  });
+
   // --- Seeding from ExportState ---
 
   describe("seedFromExportState", () => {

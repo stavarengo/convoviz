@@ -53,6 +53,26 @@ describe("Store with IndexedDB", () => {
     expect(loaded).toEqual(defaultState());
   });
 
+  it("destroy closes connection and calls deleteDatabase", async () => {
+    const { initIdb, Store } = await import("../../src/state/store");
+    const { defaultState } = await import("../../src/state/defaults");
+    await initIdb();
+    await Store.save({ ...defaultState(), logs: ["before-destroy"] });
+    const deleteSpy = vi.spyOn(indexedDB, "deleteDatabase").mockImplementation(
+      () => {
+        const req = {} as IDBOpenDBRequest;
+        setTimeout(() => req.onsuccess?.({} as Event), 0);
+        return req;
+      },
+    );
+    await Store.destroy();
+    expect(deleteSpy).toHaveBeenCalledWith("cvz-export");
+    // After destroy, load returns default (idb ref is null)
+    const loaded = await Store.load();
+    expect(loaded).toEqual(defaultState());
+    deleteSpy.mockRestore();
+  });
+
   it("save overwrites previous state", async () => {
     const { initIdb, Store } = await import("../../src/state/store");
     const { defaultState } = await import("../../src/state/defaults");
@@ -84,6 +104,12 @@ describe("Store with IndexedDB", () => {
     const { Store } = await import("../../src/state/store");
     // Don't call initIdb — _idb is null
     await Store.reset(); // should not throw
+  });
+
+  it("destroy is a no-op when initIdb was not called", async () => {
+    const { Store } = await import("../../src/state/store");
+    // Should not throw — no connection to close, no deleteDatabase call
+    await Store.destroy();
   });
 });
 

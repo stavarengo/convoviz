@@ -122,6 +122,32 @@ describe("ExportBlobStore", () => {
     expect(size).toBe(0);
   });
 
+  it("destroy closes connection and calls deleteDatabase", async () => {
+    const { initExportBlobsIdb, ExportBlobStore } = await import(
+      "../../src/state/export-blobs"
+    );
+    await initExportBlobsIdb();
+    await ExportBlobStore.putConv("conv-1", '{"id":"conv-1"}');
+    const deleteSpy = vi.spyOn(indexedDB, "deleteDatabase").mockImplementation(
+      () => {
+        const req = {} as IDBOpenDBRequest;
+        setTimeout(() => req.onsuccess?.({} as Event), 0);
+        return req;
+      },
+    );
+    await ExportBlobStore.destroy();
+    expect(deleteSpy).toHaveBeenCalledWith("cvz-export-blobs");
+    // After destroy, methods are no-ops (db is null)
+    const keys = await ExportBlobStore.getAllConvKeys();
+    expect(keys).toEqual([]);
+    deleteSpy.mockRestore();
+  });
+
+  it("destroy is a no-op when db is not initialized", async () => {
+    const { ExportBlobStore } = await import("../../src/state/export-blobs");
+    await ExportBlobStore.destroy(); // should not throw
+  });
+
   it("clear removes all data from both stores", async () => {
     const { initExportBlobsIdb, ExportBlobStore } = await import(
       "../../src/state/export-blobs"

@@ -40,6 +40,7 @@ export interface DiscoveryStore {
   getScannerState(id: string): Promise<ScannerState | null>;
   deleteScannerState(id: string): Promise<void>;
   clear(): Promise<void>;
+  destroy(): Promise<void>;
   seedFromExportState(exported: Record<string, number>): Promise<void>;
 }
 
@@ -185,6 +186,18 @@ export function createDiscoveryStore(): DiscoveryStore {
       await idbClear(db, CONVERSATIONS_STORE);
       await idbClear(db, PROJECTS_STORE);
       await idbClear(db, SCANNERS_STORE);
+    },
+
+    async destroy(): Promise<void> {
+      if (!db) return;
+      db.close();
+      db = null;
+      await new Promise<void>((resolve, reject) => {
+        const req = indexedDB.deleteDatabase(DB_NAME);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+        req.onblocked = () => resolve();
+      });
     },
 
     async seedFromExportState(
