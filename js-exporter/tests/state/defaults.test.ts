@@ -8,7 +8,7 @@ describe("KEY and VER constants", () => {
   });
 
   it("VER is the current version", () => {
-    expect(VER).toBe("cvz-bookmarklet-5.0");
+    expect(VER).toBe("cvz-bookmarklet-6.0");
   });
 });
 

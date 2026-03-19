@@ -2,8 +2,8 @@
   "name": "convoviz-exporter",
   "private": true,
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --format=iife --target=es2020 --minify --outfile=dist/script.min.js && node -e \"const fs=require('fs');fs.writeFileSync('dist/bookmarklet.js','javascript:'+fs.readFileSync('dist/script.min.js','utf-8'))\"",
-    "build:dev": "esbuild src/main.ts --bundle --format=iife --target=es2020 --outfile=dist/script.js",
+    "build": "node build.mjs",
+    "build:dev": "node build.mjs --dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

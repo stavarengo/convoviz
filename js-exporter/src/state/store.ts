@@ -56,10 +56,15 @@ export const initIdb = async (): Promise<void> => {
   try {
     _idb = await openIdb();
   } catch (e) {
-    log("warn", "state", "IndexedDB unavailable, falling back to localStorage", {
+    // Only fall back to localStorage if it's actually available
+    // (Web Workers don't have localStorage).
+    const hasLocalStorage =
+      typeof globalThis !== "undefined" &&
+      typeof globalThis.localStorage !== "undefined";
+    log("warn", "state", "IndexedDB unavailable" + (hasLocalStorage ? ", falling back to localStorage" : ""), {
       error: String((e as any)?.message || e),
     });
-    _useLocalStorage = true;
+    _useLocalStorage = hasLocalStorage;
   }
 };
 

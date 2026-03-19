@@ -2,7 +2,7 @@ import type { ExportState } from "../types";
 import { migrateV2toV3 } from "./migrate";
 
 export const KEY = "__cvz_export_state_v1__";
-export const VER = "cvz-bookmarklet-5.0";
+export const VER = "cvz-bookmarklet-6.0";
 
 export const defaultState = (): ExportState => ({
   v: 3,
