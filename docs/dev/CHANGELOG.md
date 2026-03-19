@@ -346,3 +346,33 @@
 - **Safer output cleanup**: Output cleanup now avoids following symlinks for managed directories/files.
 - **Collection merge correctness**: Fixed `ConversationCollection.update()` so it won’t skip “new but older-timestamped” conversations (common with bookmarklet data). Added tests.
 - **YAML frontmatter correctness**: YAML frontmatter is now emitted as real YAML (quoted strings, lists/dicts, ISO datetimes) and supports `tags` when enabled.
+
+## 2026-03-19 — Web Worker Architecture for JS Exporter (v6.0)
+
+### Added
+- **Web Worker processing**: All export processing (queues, scanners, network,
+  state persistence) now runs in a dedicated Web Worker thread. Main thread is
+  a pure UI control panel.
+- **Typed message protocol** (`src/worker/protocol.ts`): `MainToWorkerMessage`
+  and `WorkerToMainMessage` discriminated unions for type-safe communication.
+- **Worker bridge** (`src/worker/bridge.ts`): Main-thread worker management with
+  version-aware reconnection — re-running the bookmarklet reuses an existing
+  worker if the version matches, or gracefully replaces it.
+- **Two-pass build** (`build.mjs`): esbuild bundles the worker separately, then
+  inlines it as a string constant in the main bundle.
+- **Storage investigation doc** (`docs/ai/storage-investigation.md`): Analysis of
+  IDB size growth and recommendations (stream-to-disk, OPFS migration).
+- 30 new tests for worker protocol and bridge (554 total).
+
+### Changed
+- `main.ts` rewritten from monolith to UI-only control panel + worker launcher.
+- `store.ts`: Added `localStorage` availability guard for Web Worker compatibility.
+- `defaults.ts`: Version bumped to `cvz-bookmarklet-6.0`.
+- Build scripts updated: `npm run build` / `npm run build:dev` now use `build.mjs`.
+
+### Roadmap Updates
+- **Service Worker → Web Worker**: Marked as DONE with technical rationale for
+  why Web Worker was chosen over Service Worker (same-origin registration
+  constraint on third-party site).
+- **Logs for traceability**: Marked as DONE (was fully implemented in PRD #008).
+- **Storage**: Investigation documented, implementation deferred.

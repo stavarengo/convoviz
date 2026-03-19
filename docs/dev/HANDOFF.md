@@ -42,6 +42,39 @@ convoviz/
 └── utils.py             # Shared helpers
 ```
 
+### JS Exporter Architecture (v6.0 — Web Worker)
+
+```
+js-exporter/
+├── src/
+│   ├── main.ts              # Main thread: UI control panel + worker launcher
+│   ├── worker/
+│   │   ├── protocol.ts      # Typed postMessage protocol (shared types)
+│   │   ├── worker-entry.ts  # Worker thread: coordinator + queues + scanners
+│   │   └── bridge.ts        # Main thread: worker management + version check
+│   ├── bootstrap.ts         # Component wiring (event bus + queues + scanners)
+│   ├── export/              # Queue workers (chat, attachment, knowledge)
+│   │   ├── coordinator.ts   # Orchestrates scan → export → completion
+│   │   └── ...
+│   ├── scan/                # Conversation + project scanners
+│   ├── state/               # IDB-backed state, logging, blob storage
+│   ├── net/                 # HTTP client with auth + 429 backoff
+│   ├── ui/                  # Floating panel + task list (DOM-only)
+│   └── utils/               # Formatting, binary, sanitization
+├── build.mjs               # Two-pass esbuild (worker → inline → main)
+├── dist/
+│   ├── worker.js            # Standalone worker bundle (build artifact)
+│   ├── script.min.js        # Production IIFE (worker embedded)
+│   ├── script.js            # Dev IIFE (worker embedded)
+│   └── bookmarklet.js       # javascript: prefixed production build
+└── tests/                   # 39 test files, 554 tests
+```
+
+**Processing model**: All export work runs in a dedicated Web Worker.
+The main thread is a UI control panel that communicates via typed `postMessage`.
+Re-running the bookmarklet pings the existing worker — same version reuses it,
+different version terminates and recreates.
+
 ### Important Patterns
 
 #### Configuration Flow
@@ -97,6 +130,10 @@ Archive extraction:
 | `convoviz/pipeline.py` | Main processing flow - start here to understand the app |
 | `convoviz/io/assets.py`| Logic for finding and copying image assets |
 | `convoviz/message_logic.py` | Message extraction/visibility logic (kept out of models) |
+| `js-exporter/src/worker/protocol.ts` | Worker ↔ main thread message types |
+| `js-exporter/src/worker/worker-entry.ts` | Worker bootstrap (all processing logic) |
+| `js-exporter/src/main.ts` | Main thread entry (UI + worker bridge) |
+| `js-exporter/build.mjs` | Two-pass build script |
 | `AGENTS.md` | Context and operational guidelines for AI agents |
 
 ## Running the Project
@@ -112,7 +149,15 @@ uv run convoviz --input ./extracted_export_dir --output ./output
 
 # Full quality check (Lint + Type check + Format + Tests)
 uv run ruff check convoviz tests && uv run ty check convoviz && uv run ruff format && uv run pytest
+
+# JS Exporter quality check
+cd js-exporter && npm run typecheck && npm test
 ```
+
+## Pending / Next Steps
+
+- **Storage migration**: IndexedDB `cvz-export-blobs` grows large (~800MB for 1337 messages). Investigation doc at `docs/ai/storage-investigation.md` recommends stream-to-disk via File System Access API as next improvement. Not yet implemented.
+- **SharedWorker upgrade**: Current Web Worker dies on page reload. SharedWorker would survive navigations within chatgpt.com origin. Low priority (state persistence already handles resume).
 
 ## Meta-Notes
 - This is a working document for brainstorming and info-sharing; it is not a directive.
