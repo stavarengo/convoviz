@@ -25,6 +25,7 @@
     "assets": [
       "dist/script.min.js",
       "dist/bookmarklet.js",
+      "dist/bookmarklet-loader.js",
       "dist/worker.js"
     ]
   },
