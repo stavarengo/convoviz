@@ -5,6 +5,8 @@
 
 ## March 20, 2026
 
+- **chore(js-exporter)**: Added `release-it` for version management with `npm run release` scripts. Created `.release-it.json` config (no npm publish, no GitHub release — handled by main workflow).
+- **ci**: Extended GitHub Release workflow to build js-exporter and attach `convoviz-exporter-script.min.js`, `convoviz-exporter-bookmarklet.js`, and `convoviz-exporter-worker.js` alongside Python dist files.
 - **fix(js-exporter)**: Single project dropdown now loads projects via worker — previously failed because `_loadProjectsOnly` tried to use the main-thread network stub which throws on `fetchJson`. Added `scan-projects` worker message and `requestProjectScan` UI callback.
 - **fix(js-exporter)**: Single project export now only exports conversations matching the selected `filterGizmoId`. Previously all discovered conversations were enqueued regardless of the filter.
 - **docs(js-exporter)**: Updated README to document all four build outputs (`script.js`, `script.min.js`, `bookmarklet.js`, `worker.js`) and the main-thread/worker architecture.

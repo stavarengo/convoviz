@@ -137,6 +137,20 @@ jobs:
           name: dist
           path: dist/
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build JS Exporter
+        run: cd js-exporter && npm install && npm run build
+
+      - name: Prepare JS Exporter assets
+        run: |
+          cp js-exporter/dist/script.min.js dist/convoviz-exporter-script.min.js
+          cp js-exporter/dist/bookmarklet.js dist/convoviz-exporter-bookmarklet.js
+          cp js-exporter/dist/worker.js dist/convoviz-exporter-worker.js
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:

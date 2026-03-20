@@ -1,0 +1,16 @@
+{
+  "npm": {
+    "publish": false
+  },
+  "github": {
+    "release": false
+  },
+  "git": {
+    "commitMessage": "chore(js-exporter): release v${version}",
+    "tagName": "js-exporter-v${version}",
+    "tagAnnotation": "JS Exporter v${version}"
+  },
+  "hooks": {
+    "before:build": "npm run build && npm test"
+  }
+}
