@@ -31,6 +31,7 @@ jobs:
           mkdir -p release-assets
           cp js-exporter/dist/script.min.js release-assets/convoviz-exporter-script.min.js
           cp js-exporter/dist/bookmarklet.js release-assets/convoviz-exporter-bookmarklet.js
+          cp js-exporter/dist/bookmarklet-loader.js release-assets/convoviz-exporter-bookmarklet-loader.js
           cp js-exporter/dist/worker.js release-assets/convoviz-exporter-worker.js
 
       - name: Create GitHub Release

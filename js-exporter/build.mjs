@@ -56,6 +56,22 @@ await esbuild.build({
 if (!isDev) {
   const script = readFileSync("dist/script.min.js", "utf-8");
   writeFileSync("dist/bookmarklet.js", "javascript:" + script);
+
+  // Loader bookmarklet — fetches & evals the latest release at runtime.
+  // Install this once; it always runs the newest version automatically.
+  const loaderBookmarklet =
+    `javascript:(async()=>{` +
+    `try{` +
+    `const r=await fetch('https://api.github.com/repos/stavarengo/convoviz/releases/latest');` +
+    `const d=await r.json();` +
+    `const a=d.assets.find(a=>a.name==='convoviz-exporter-script.min.js');` +
+    `if(!a)return alert('ConvoViz: asset not found in latest release');` +
+    `const s=await fetch(a.browser_download_url);` +
+    `const c=await s.text();` +
+    `eval(c);` +
+    `}catch(e){alert('ConvoViz error: '+e.message);}` +
+    `})();`;
+  writeFileSync("dist/bookmarklet-loader.js", loaderBookmarklet);
 }
 
 const label = isDev ? "dev" : "production";

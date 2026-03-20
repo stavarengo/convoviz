@@ -149,6 +149,7 @@ jobs:
         run: |
           cp js-exporter/dist/script.min.js dist/convoviz-exporter-script.min.js
           cp js-exporter/dist/bookmarklet.js dist/convoviz-exporter-bookmarklet.js
+          cp js-exporter/dist/bookmarklet-loader.js dist/convoviz-exporter-bookmarklet-loader.js
           cp js-exporter/dist/worker.js dist/convoviz-exporter-worker.js
 
       - name: Create Release
