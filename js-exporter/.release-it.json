@@ -1,16 +1,39 @@
 {
-  "npm": {
-    "publish": false
+  "$schema": "https://unpkg.com/release-it/schema/release-it.json",
+  "git": {
+    "requireCleanWorkingDir": false,
+    "requireBranch": "main",
+    "requireUpstream": true,
+    "requireCommits": true,
+    "addUntrackedFiles": false,
+    "commit": true,
+    "commitMessage": "chore(js-exporter): release v${version} :rocket:",
+    "tag": true,
+    "tagName": "js-exporter-v${version}",
+    "tagAnnotation": "JS Exporter v${version}",
+    "push": true
   },
   "github": {
-    "release": false
+    "release": true,
+    "releaseName": "JS Exporter v${version}",
+    "autoGenerate": true,
+    "preRelease": false,
+    "draft": false,
+    "tokenRef": "GITHUB_TOKEN",
+    "skipChecks": false,
+    "web": false,
+    "assets": [
+      "dist/script.min.js",
+      "dist/bookmarklet.js",
+      "dist/worker.js"
+    ]
   },
-  "git": {
-    "commitMessage": "chore(js-exporter): release v${version}",
-    "tagName": "js-exporter-v${version}",
-    "tagAnnotation": "JS Exporter v${version}"
+  "npm": {
+    "publish": false,
+    "ignoreVersion": true,
+    "allowSameVersion": true
   },
   "hooks": {
-    "before:build": "npm run build && npm test"
+    "before:bump": "npm run build && npm test"
   }
 }
