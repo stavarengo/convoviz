@@ -1,0 +1,41 @@
+name: JS Exporter Release
+
+on:
+  push:
+    tags:
+      - "js-exporter-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release JS Exporter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install & build
+        working-directory: js-exporter
+        run: |
+          npm ci
+          npm run build
+          npm test
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          cp js-exporter/dist/script.min.js release-assets/convoviz-exporter-script.min.js
+          cp js-exporter/dist/bookmarklet.js release-assets/convoviz-exporter-bookmarklet.js
+          cp js-exporter/dist/worker.js release-assets/convoviz-exporter-worker.js
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+          draft: false
