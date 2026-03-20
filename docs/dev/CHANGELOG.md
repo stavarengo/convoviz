@@ -3,6 +3,12 @@
 > **Note**: This changelog is informal and incomplete. It tracks the primary record of all functional and behavioral updates to Convoviz.
 > **APPEND-ONLY. DO NOT EDIT, REWRITE, OR DELETE PAST ENTRIES. ALL NEW UPDATES MUST BE ADDED TO THE TOP.**
 
+## March 20, 2026
+
+- **fix(js-exporter)**: Single project dropdown now loads projects via worker — previously failed because `_loadProjectsOnly` tried to use the main-thread network stub which throws on `fetchJson`. Added `scan-projects` worker message and `requestProjectScan` UI callback.
+- **fix(js-exporter)**: Single project export now only exports conversations matching the selected `filterGizmoId`. Previously all discovered conversations were enqueued regardless of the filter.
+- **docs(js-exporter)**: Updated README to document all four build outputs (`script.js`, `script.min.js`, `bookmarklet.js`, `worker.js`) and the main-thread/worker architecture.
+
 ## February 28, 2026
 
 - **Bookmarklet reliability overhaul**: Replaced `js/script.js` with the improved bookmarklet (formerly `js/script.gpt.temp.js`). The new script uses IndexedDB for state persistence, has a built-in ZIP implementation (no JSZip dependency), includes resume/pause, circuit breaker for rate limiting, and deduplicated token refresh. Updated `js/HOW_TO_USE.md` to reflect the new workflow.

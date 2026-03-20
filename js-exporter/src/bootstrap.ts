@@ -286,6 +286,8 @@ export function bootstrap(deps: BootstrapDeps): BootstrapResult {
   const enqueueConversation = (payload: { id: string }): void => {
     discoveryStore.getConversation(payload.id).then((record) => {
       if (!record) return;
+      // When a single project filter is active, skip conversations that don't match
+      if (S.settings.filterGizmoId && record.gizmoId !== S.settings.filterGizmoId) return;
       const item: PendingItem = {
         id: record.id,
         title: record.title,

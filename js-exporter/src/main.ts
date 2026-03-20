@@ -240,6 +240,7 @@ function mergeInto(target: ExportState, source: ExportState): void {
         // Settings changes from UI — forward to worker
         bridge.updateSettings(S.settings);
       },
+      requestProjectScan: () => bridge.scanProjects(),
       getAccumulatedSize: () => ExportBlobStore.totalSize(),
       onDownload: triggerDownload,
       onReset: async () => {

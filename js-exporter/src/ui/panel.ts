@@ -35,6 +35,8 @@ export interface UIDeps {
     onProject: ((proj: ProjectInfo) => void) | null,
     setStatus: (msg: string) => void,
   ) => Promise<ProjectInfo[]>;
+  /** Request the worker to scan projects (used in worker mode). */
+  requestProjectScan?: () => void;
 }
 
 export interface UI {
@@ -92,6 +94,11 @@ export const createUI = (deps: UIDeps): UI => {
     if (!sel) return;
     const current = S.settings.filterGizmoId || "";
     const projects = S.projects || [];
+    // Clear loading flag once projects arrive from the worker
+    if (_projectLoadPromise && projects.length > 0) {
+      _projectLoadPromise = null;
+      _projectLoadAbort = null;
+    }
     let html = "";
     if (_projectLoadPromise) {
       html = '<option value="">Loading projects\u2026</option>';
@@ -120,6 +127,17 @@ export const createUI = (deps: UIDeps): UI => {
 
   const _loadProjectsOnly = (): void => {
     if (_projectLoadPromise) return;
+
+    // In worker mode, delegate project scanning to the worker
+    if (deps.requestProjectScan) {
+      log("info", "scan", "Requesting project scan from worker");
+      _projectLoadPromise = Promise.resolve(); // mark as loading
+      deps.requestProjectScan();
+      _populateProjectSelect();
+      return;
+    }
+
+    // Direct mode (non-worker): scan projects via network
     const ac = new AbortController();
     _projectLoadAbort = ac;
     log("info", "scan", "Loading projects");

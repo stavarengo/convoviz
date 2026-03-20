@@ -17,6 +17,7 @@ export type MainToWorkerMessage =
   | { type: "start" }
   | { type: "stop" }
   | { type: "rescan"; force: boolean }
+  | { type: "scan-projects" }
   | { type: "update-settings"; settings: Partial<Settings> }
   | { type: "reset" }
   | { type: "ping" };

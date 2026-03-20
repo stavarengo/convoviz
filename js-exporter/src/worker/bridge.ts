@@ -53,6 +53,7 @@ export interface WorkerBridge {
   start(): void;
   stop(): void;
   rescan(force: boolean): void;
+  scanProjects(): void;
   updateSettings(settings: Partial<Settings>): void;
   reset(): void;
   terminate(): void;
@@ -95,6 +96,9 @@ export function createWorkerBridge(workerCode: string): WorkerBridge {
     },
     rescan(force: boolean): void {
       bridge.send({ type: "rescan", force });
+    },
+    scanProjects(): void {
+      bridge.send({ type: "scan-projects" });
     },
     updateSettings(settings: Partial<Settings>): void {
       bridge.send({ type: "update-settings", settings });

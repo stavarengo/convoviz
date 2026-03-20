@@ -82,7 +82,7 @@ ctx.addEventListener(
 let coordinator: Coordinator | null = null;
 let S: ExportState | null = null;
 let components: BootstrapResult | null = null;
-let discoveryStoreRef: { destroy(): Promise<void> } | null = null;
+let discoveryStoreRef: ReturnType<typeof createDiscoveryStore> | null = null;
 let _tickId: ReturnType<typeof setInterval> | 0 = 0;
 
 /* ------------------------------------------------------------------ */
@@ -289,6 +289,27 @@ ctx.onmessage = async (e: MessageEvent<MainToWorkerMessage>) => {
 
     case "rescan":
       if (coordinator) coordinator.rescan(msg.force);
+      break;
+
+    case "scan-projects":
+      if (components && S) {
+        const ac = new AbortController();
+        components.projectScanner.start(ac.signal).then(async () => {
+          if (discoveryStoreRef && S) {
+            const projects = await discoveryStoreRef.getAllProjects();
+            S!.projects = projects.map((p) => ({
+              gizmoId: p.gizmoId,
+              name: p.name || "",
+              emoji: p.emoji || "",
+              theme: p.theme || "",
+              instructions: p.instructions || "",
+              files: p.files || [],
+            }));
+            S!.scan.totalProjects = S!.projects!.length;
+          }
+          broadcastState();
+        }).catch(() => broadcastState());
+      }
       break;
 
     case "update-settings":
