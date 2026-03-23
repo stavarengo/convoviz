@@ -212,12 +212,27 @@ export function createCoordinator(deps: CoordinatorDeps): Coordinator {
         ac.signal.addEventListener("abort", onParentAbort, { once: true });
 
         // Start scanners
-        const convScanPromise = conversationScanner.start(scanAc.signal).catch((e: any) => {
-          if (e && e.name !== "AbortError") log("error", "scan", "Conversation scanner error", { error: String(e && e.message || e) });
-        });
-        const projScanPromise = projectScanner.start(scanAc.signal).catch((e: any) => {
-          if (e && e.name !== "AbortError") log("error", "scan", "Project scanner error", { error: String(e && e.message || e) });
-        });
+        const filterGizmoId = S.settings.filterGizmoId;
+        let convScanPromise: Promise<void>;
+        let projScanPromise: Promise<void>;
+
+        if (filterGizmoId) {
+          // Single-project mode: only scan conversations for the specific project
+          convScanPromise = deps.scanProjectOnly(filterGizmoId, scanAc.signal).catch((e: any) => {
+            if (e && e.name !== "AbortError") log("error", "scan", "Single-project scan error", { error: String(e?.message || e) });
+          });
+          projScanPromise = Promise.resolve();
+          // Pre-mark scanner trackers done so the existing fallback handles completion
+          generalScannerDone = true;
+          projectScannerDone = true;
+        } else {
+          convScanPromise = conversationScanner.start(scanAc.signal).catch((e: any) => {
+            if (e && e.name !== "AbortError") log("error", "scan", "Conversation scanner error", { error: String(e && e.message || e) });
+          });
+          projScanPromise = projectScanner.start(scanAc.signal).catch((e: any) => {
+            if (e && e.name !== "AbortError") log("error", "scan", "Project scanner error", { error: String(e && e.message || e) });
+          });
+        }
 
         // Start all queues
         const chatStartPromise = chatQueue.start(ac.signal);

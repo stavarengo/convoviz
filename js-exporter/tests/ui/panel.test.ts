@@ -602,6 +602,60 @@ describe("createUI", () => {
     });
   });
 
+  describe("single project filter", () => {
+    it("shows error when start is clicked with single project checked but no project selected", () => {
+      const deps = makeDeps();
+      const ui = createUI(deps) as any;
+      ui.inject();
+      const singleCheck = document.getElementById("cvz-single-proj") as HTMLInputElement;
+      singleCheck.checked = true;
+      // S.settings.filterGizmoId is null by default
+      const startBtn = document.getElementById("cvz-start")!;
+      startBtn.click();
+      expect(document.getElementById("cvz-status")!.textContent).toContain("Select a project");
+    });
+
+    it("proceeds to start when single project is checked and project is selected", () => {
+      const deps = makeDeps();
+      deps.S.settings.filterGizmoId = "g-abc123";
+      const mockExporter = {
+        start: vi.fn(),
+        stop: vi.fn(),
+        rescan: vi.fn(),
+        scanPromise: null,
+        chatQueue: null,
+        attachmentQueue: null,
+        knowledgeQueue: null,
+      };
+      const ui = createUI(deps) as any;
+      ui.inject();
+      ui.setExporter(mockExporter);
+      const singleCheck = document.getElementById("cvz-single-proj") as HTMLInputElement;
+      singleCheck.checked = true;
+      const startBtn = document.getElementById("cvz-start")!;
+      startBtn.click();
+      expect(mockExporter.start).toHaveBeenCalled();
+      expect(document.getElementById("cvz-status")!.textContent).not.toContain("Select a project");
+    });
+
+    it("clears loading state and shows no-projects message when worker returns empty projects", () => {
+      const deps = makeDeps();
+      const requestProjectScan = vi.fn();
+      const ui = createUI({ ...deps, requestProjectScan }) as any;
+      ui.inject();
+      const singleCheck = document.getElementById("cvz-single-proj") as HTMLInputElement;
+      // Check the box - triggers _loadProjectsOnly which sets _projectLoadPromise
+      singleCheck.checked = true;
+      singleCheck.dispatchEvent(new Event("change"));
+      // Simulate worker response: projects are empty
+      // renderProjects is called which calls _populateProjectSelect
+      ui.renderProjects();
+      const sel = document.getElementById("cvz-proj-select") as HTMLSelectElement;
+      expect(sel.innerHTML).not.toContain("Loading projects");
+      expect(sel.innerHTML).toContain("no projects found");
+    });
+  });
+
   describe("reset button", () => {
     it("shows a confirmation dialog mentioning accumulated export data", () => {
       const deps = makeDeps();

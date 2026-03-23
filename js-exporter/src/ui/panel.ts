@@ -94,8 +94,9 @@ export const createUI = (deps: UIDeps): UI => {
     if (!sel) return;
     const current = S.settings.filterGizmoId || "";
     const projects = S.projects || [];
-    // Clear loading flag once projects arrive from the worker
-    if (_projectLoadPromise && projects.length > 0) {
+    // In worker mode, _projectLoadAbort is never set, so !_projectLoadAbort is always true.
+    // In direct mode, _projectLoadAbort is set while scanning; only clear when we have projects.
+    if (_projectLoadPromise && (projects.length > 0 || !_projectLoadAbort)) {
       _projectLoadPromise = null;
       _projectLoadAbort = null;
     }
@@ -351,6 +352,11 @@ export const createUI = (deps: UIDeps): UI => {
       });
 
       d.querySelector("#cvz-start")!.addEventListener("click", () => {
+        const singleCheck = d.querySelector("#cvz-single-proj") as HTMLInputElement;
+        if (singleCheck && singleCheck.checked && !S.settings.filterGizmoId) {
+          ui.setStatus('\u26A0\uFE0F Select a project first, or uncheck "Single project".');
+          return;
+        }
         if (_exporter) _exporter.start();
       });
       d.querySelector("#cvz-stop")!.addEventListener("click", () => {

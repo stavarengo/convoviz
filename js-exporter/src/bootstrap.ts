@@ -58,6 +58,8 @@ export interface BootstrapResult {
   setScanAbortSignal(signal: AbortSignal): void;
   /** Returns promises for all project-spawned scanners (for awaiting completion). */
   getSpawnedScannerPromises(): Promise<void>[];
+  /** Scan conversations for a single project only (used when filterGizmoId is set). */
+  scanProjectOnly(gizmoId: string, signal: AbortSignal): Promise<void>;
 }
 
 export function bootstrap(deps: BootstrapDeps): BootstrapResult {
@@ -432,6 +434,16 @@ export function bootstrap(deps: BootstrapDeps): BootstrapResult {
     },
     getSpawnedScannerPromises(): Promise<void>[] {
       return _spawnedScannerPromises;
+    },
+    scanProjectOnly(gizmoId: string, signal: AbortSignal): Promise<void> {
+      const scanner = createConversationScanner({
+        net,
+        discoveryStore,
+        eventBus,
+        scannerId: 'project-conv-' + gizmoId,
+        gizmoId,
+      });
+      return scanner.start(signal);
     },
   };
 }
